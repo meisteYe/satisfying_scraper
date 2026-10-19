@@ -1,0 +1,29 @@
+name: satisfying_scraper
+description: "Oddly Satisfying Boya Kazima ve ASMR Uygulamasi"
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  audioplayers: ^6.7.1
+  vibration: ^3.1.8
+  confetti: ^0.8.0
+  shared_preferences: ^2.5.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/audio/
