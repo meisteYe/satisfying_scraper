@@ -20,6 +20,7 @@ class TrophyItem {
     required this.lore,
   });
 
+  // 20 EŞSİZ NESNELİ DEV MÜZE KOLEKSİYONU!
   static const List<TrophyItem> allTrophies = [
     TrophyItem(
       id: 'elmas',
@@ -28,8 +29,7 @@ class TrophyItem {
       rarity: 'NADİR',
       rarityColor: Colors.cyanAccent,
       requiredLevelToDiscover: 1,
-      lore:
-          'Yüzyıllarca madenin derinliklerinde unutulmuş kusursuz kesim elmas.',
+      lore: 'Madenin derinliklerinde unutulmuş kusursuz kesim elmas.',
     ),
     TrophyItem(
       id: 'zumrut',
@@ -38,8 +38,79 @@ class TrophyItem {
       rarity: 'NADİR',
       rarityColor: Colors.greenAccent,
       requiredLevelToDiscover: 2,
-      lore:
-          'Antik tapınak kalıntılarından çıkarılan zümrüt yeşili değerli taş.',
+      lore: 'Antik tapınak kalıntılarından çıkarılan zümrüt yeşili taş.',
+    ),
+    TrophyItem(
+      id: 'pusula',
+      title: 'KORSAN PUSULASI',
+      assetPath: 'assets/images/pusula.png',
+      rarity: 'NADİR',
+      rarityColor: Colors.amber,
+      requiredLevelToDiscover: 3,
+      lore: 'Batık bir kalyondan çıkarılan pirinç kaptan pusulası.',
+    ),
+    TrophyItem(
+      id: 'kask',
+      title: 'CEPHE KASKI',
+      assetPath: 'assets/images/kask.png',
+      rarity: 'NADİR',
+      rarityColor: Colors.green,
+      requiredLevelToDiscover: 4,
+      lore: 'Siper çamuruna gömülmüş tarihi çelik miğfer.',
+    ),
+    TrophyItem(
+      id: 'teker',
+      title: 'YARIŞ JANTI & TEKER',
+      assetPath: 'assets/images/teker.png',
+      rarity: 'BOSS',
+      rarityColor: Colors.redAccent,
+      requiredLevelToDiscover: 5,
+      lore: 'Zorlu ralli etaplarında katrana bulanmış özel yarış tekeri.',
+    ),
+    TrophyItem(
+      id: 'ayakkabi',
+      title: 'RETRO SNEAKER',
+      assetPath: 'assets/images/ayakkabi.png',
+      rarity: 'NADİR',
+      rarityColor: Colors.blueAccent,
+      requiredLevelToDiscover: 6,
+      lore: 'Koleksiyoncuların peşinde koştuğu nadir basketbol ayakkabısı.',
+    ),
+    TrophyItem(
+      id: 'vazo',
+      title: 'ANTİK HANEDAN VAZOSU',
+      assetPath: 'assets/images/vazo.png',
+      rarity: 'DESTANSI',
+      rarityColor: Colors.orangeAccent,
+      requiredLevelToDiscover: 7,
+      lore: 'Üzeri altın işlemeli bin yıllık saray vazosu.',
+    ),
+    TrophyItem(
+      id: 'oyunkolu',
+      title: 'PRO GAMEPAD',
+      assetPath: 'assets/images/oyunkolu.png',
+      rarity: 'NADİR',
+      rarityColor: Colors.indigoAccent,
+      requiredLevelToDiscover: 8,
+      lore: 'Turnuva şampiyonundan kalma özel üretim oyun kolu.',
+    ),
+    TrophyItem(
+      id: 'capa',
+      title: 'OKYANUS ÇAPASI',
+      assetPath: 'assets/images/capa.png',
+      rarity: 'DESTANSI',
+      rarityColor: Colors.tealAccent,
+      requiredLevelToDiscover: 9,
+      lore: 'Yıllarca okyanus tabanında oksitlenmiş dev gemi çapası.',
+    ),
+    TrophyItem(
+      id: 'tac',
+      title: 'İMPARATORLUK TACI',
+      assetPath: 'assets/images/tac.png',
+      rarity: 'BOSS',
+      rarityColor: Colors.amberAccent,
+      requiredLevelToDiscover: 10,
+      lore: 'Saf altından dövülmüş krallık tacı.',
     ),
     TrophyItem(
       id: 'bitcoin',
@@ -47,9 +118,44 @@ class TrophyItem {
       assetPath: 'assets/images/bitcoin.png',
       rarity: 'DESTANSI',
       rarityColor: Colors.amber,
-      requiredLevelToDiscover: 4,
-      lore:
-          'Soğuk cüzdan mahzenlerinde çamura bulanmış fiziksel koleksiyon parası.',
+      requiredLevelToDiscover: 11,
+      lore: 'Soğuk cüzdan mahzenlerinde saklanan fiziksel kripto para.',
+    ),
+    TrophyItem(
+      id: 'kupa',
+      title: 'DÜNYA KUPASI',
+      assetPath: 'assets/images/kupa.png',
+      rarity: 'EFSANEVİ',
+      rarityColor: Colors.yellowAccent,
+      requiredLevelToDiscover: 12,
+      lore: 'Şampiyonların kaldırdığı saf altın zafer kupası.',
+    ),
+    TrophyItem(
+      id: 'kilic',
+      title: 'ŞÖVALYE KILICI',
+      assetPath: 'assets/images/kilic.png',
+      rarity: 'DESTANSI',
+      rarityColor: Colors.blueGrey,
+      requiredLevelToDiscover: 13,
+      lore: 'Orta Çağ kalelerinden kalma keskin çelik kılıç.',
+    ),
+    TrophyItem(
+      id: 'gitar',
+      title: 'EFSANEVİ ELEKTRO GİTAR',
+      assetPath: 'assets/images/gitar.png',
+      rarity: 'DESTANSI',
+      rarityColor: Colors.pinkAccent,
+      requiredLevelToDiscover: 14,
+      lore: 'Rock tarihine geçen sahne gitarı.',
+    ),
+    TrophyItem(
+      id: 'rolex',
+      title: 'ZÜMRÜT ROLEX SAAT',
+      assetPath: 'assets/images/rolex.png',
+      rarity: 'BOSS',
+      rarityColor: Colors.greenAccent,
+      requiredLevelToDiscover: 15,
+      lore: 'İsviçre işçiliğiyle üretilmiş altın-zümrüt kol saati.',
     ),
     TrophyItem(
       id: 'disko_topu',
@@ -57,18 +163,44 @@ class TrophyItem {
       assetPath: 'assets/images/disko_topu.png',
       rarity: 'DESTANSI',
       rarityColor: Colors.purpleAccent,
-      requiredLevelToDiscover: 7,
-      lore: '80\'lerin efsanevi kulüplerinden kalma ayna parçalı disko küresi.',
+      requiredLevelToDiscover: 16,
+      lore: '80\'lerin kulüplerinden kalma yüzlerce aynalı disko küresi.',
     ),
     TrophyItem(
-      id: 'teker',
-      title: 'YARIŞ JANTI & TEKER',
-      assetPath: 'assets/images/teker.png',
+      id: 'kawasaki',
+      title: 'KAWASAKI NINJA H2',
+      assetPath: 'assets/images/kawasaki.png',
+      rarity: 'EFSANEVİ',
+      rarityColor: Colors.lightGreenAccent,
+      requiredLevelToDiscover: 18,
+      lore: 'Süperşarjlı pist canavarı yarış motosikleti.',
+    ),
+    TrophyItem(
+      id: 'tank',
+      title: 'ZIRHLI MUHAREBE TANKI',
+      assetPath: 'assets/images/tank.png',
+      rarity: 'BOSS',
+      rarityColor: Colors.deepOrangeAccent,
+      requiredLevelToDiscover: 20,
+      lore: 'Ağır sanayi pası ve çamurla kaplanmış zırhlı tank.',
+    ),
+    TrophyItem(
+      id: 'mclaren',
+      title: 'MCLAREN SÜPER ARABA',
+      assetPath: 'assets/images/mclaren.png',
+      rarity: 'EFSANEVİ',
+      rarityColor: Colors.orange,
+      requiredLevelToDiscover: 22,
+      lore: 'Terk edilmiş bir garajda bulunan aerodinamik süper otomobil.',
+    ),
+    TrophyItem(
+      id: 'f16',
+      title: 'F-16 SAVAŞ JETİ',
+      assetPath: 'assets/images/f16.png',
       rarity: 'EFSANEVİ (BOSS)',
       rarityColor: Colors.redAccent,
-      requiredLevelToDiscover: 5,
-      lore:
-          'Zorlu ralli etaplarında katran ve çamura gömülmüş özel yarış tekeri.',
+      requiredLevelToDiscover: 25,
+      lore: 'Hangarda yıllarca oksitlenmiş süpersonik avcı uçağı.',
     ),
   ];
 }
@@ -106,7 +238,6 @@ class DirtLayerConfig {
     ],
   );
 
-  // Buhar kullanılırken beyaz/mavi sıcak su buharı ve çözülen kahve damlacıkları çıkar!
   static const DirtLayerConfig tarLayer = DirtLayerConfig(
     name: 'Kahve & Katran',
     assetPath: 'assets/images/kirli_kahve.png',
@@ -114,10 +245,10 @@ class DirtLayerConfig {
     requiredToolName: 'BUHAR MAKİNESİ',
     requiredToolUnlockLevel: 10,
     flakeColors: [
-      Color(0xFFFFFFFF), // Saf Beyaz Sıcak Buhar
-      Color(0xFFE0F7FA), // Açık Buz Mavisi Buhar
-      Color(0xFFCFD8DC), // Yoğun Duman Grisi
-      Color(0xFF8D6E63), // Çözülen Kahve Buharı
+      Color(0xFFFFFFFF),
+      Color(0xFFE0F7FA),
+      Color(0xFFCFD8DC),
+      Color(0xFF8D6E63),
     ],
   );
 
@@ -173,8 +304,7 @@ class ScrapeParticle {
   final double decay;
   final Color color;
   final bool isSquare;
-  final bool
-  isSteamCloud; // YENİ: Buhar bulutu yerçekimiyle düşmez, yukarı yükselip genişler!
+  final bool isSteamCloud;
 
   ScrapeParticle({
     required this.position,
@@ -190,12 +320,10 @@ class ScrapeParticle {
   void update() {
     position += velocity;
     if (isSteamCloud) {
-      // GERÇEK BUHAR FİZİĞİ: Yukarı doğru süzülür (-0.22 ivme) ve yayıldıkça çapı büyür (1.035x)!
       velocity = Offset(velocity.dx * 0.94, velocity.dy - 0.22);
       size *= 1.032;
       life -= decay * 0.85;
     } else {
-      // KATI TOZ/TALAŞ FİZİĞİ: Yerçekimiyle aşağı düşer (+0.38 ivme) ve küçülür
       velocity = Offset(velocity.dx * 0.96, velocity.dy + 0.38);
       size *= 0.98;
       life -= decay;
@@ -400,6 +528,8 @@ class GeneratedLevel {
   final String difficultyLabel;
   final Color difficultyColor;
   final bool isBossLevel;
+  final bool
+  isMysteryBoss; // Yeni: Gizemli Boss mu? (Başta adı ??? olur, bitince açıklanır!)
   final String cleanAsset;
   final List<DirtLayerConfig> dirtStages;
   final int coinReward;
@@ -415,6 +545,7 @@ class GeneratedLevel {
     required this.difficultyLabel,
     required this.difficultyColor,
     required this.isBossLevel,
+    this.isMysteryBoss = false,
     required this.cleanAsset,
     required this.dirtStages,
     required this.coinReward,
@@ -441,6 +572,7 @@ class LeaderboardEntry {
   final String countryFlag;
   final double bestTimeSeconds;
   final int totalLevelsCleared;
+  final int totalStars;
   final bool isCurrentUser;
 
   const LeaderboardEntry({
@@ -448,6 +580,7 @@ class LeaderboardEntry {
     required this.countryFlag,
     required this.bestTimeSeconds,
     required this.totalLevelsCleared,
+    this.totalStars = 0,
     this.isCurrentUser = false,
   });
 }

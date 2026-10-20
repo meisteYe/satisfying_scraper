@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vibration/vibration.dart';
 
 import '../models/game_models.dart';
+import '../services/leaderboard_service.dart';
 import '../services/level_generator.dart';
 import '../services/monetization_manager.dart';
 import '../widgets/game_modals.dart';
@@ -31,6 +32,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   bool _isSoundEnabled = true;
   bool _isHapticsEnabled = true;
 
+  String _playerId = '';
   String _playerName = 'Usta_Oyuncu';
   Set<String> _discoveredTrophyIds = {};
   Map<String, int> _trophyCleanCounts = {};
@@ -49,15 +51,14 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   int _brushPowerUpgradeLevel = 0;
   int _selectedToolIndex = 0;
 
-  double _bestSpeedrunSeconds = 0.0;
+  // Günlük giriş ödülü serisi
+  int _loginStreakDays = 1;
+
   DateTime? _levelStartTimestamp;
   double _lastClearedTimeSeconds = 0.0;
 
   double _feverCharge = 0.0;
   bool _isFeverActive = false;
-
-  // KRİTİK KORUMA: Bir katman bittiğinde oyuncu parmağını ekrandan çekip
-  // yeni katmanın aletini seçmeden kazımaya devam etmesini %100 engeller!
   bool _waitingForFingerLift = false;
 
   late GeneratedLevel _currentLevel;
@@ -70,11 +71,14 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   List<ui.Image> _stageDirtyImages = [];
   int _currentStageIndex = 0;
   int get _totalStages => _currentLevel.dirtStages.length;
-  DirtLayerConfig get _activeStageDirtConfig =>
-      _currentLevel.dirtStages[_currentStageIndex];
 
-  /// Seçili olan alet şu anki katmanı temizleyebilir mi?
-  /// (Artık Cila aşaması da zorunlu olarak 'polish' aletini veya Joker Lazer'i ister!)
+  // GÜVENLİ KALKAN (.clamp): Seviye geçişlerinde asla RangeError fırlatmaz!
+  DirtLayerConfig get _activeStageDirtConfig =>
+      _currentLevel.dirtStages[_currentStageIndex.clamp(
+        0,
+        _currentLevel.dirtStages.length - 1,
+      )];
+
   bool get _isCorrectToolSelectedForCurrentStage {
     if (_currentTool.isVipJoker) return true;
     return _currentTool.id == _activeStageDirtConfig.requiredToolId;
@@ -101,7 +105,23 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   double _toolTiltAngle = 0.25;
   bool _isShowingBefore = false;
 
-  final double _dirtOpacity = 0.75;
+  // Gizemli Boss modunda kir başlangıçta %96 opak olur ki alttaki nesne görünmesin!
+  double get _effectiveDirtOpacity {
+    if (_currentLevel.isMysteryBoss &&
+        !_isLevelCompleted &&
+        _currentStageIndex == 0) {
+      return 0.96;
+    }
+    return 0.75;
+  }
+
+  /// Gizemli Boss modunda bölüm bitene kadar nesnenin adı '??? GİZEMLİ YADİGAR ???' olarak gizlenir!
+  String get _displayedLevelTitle {
+    if (_currentLevel.isMysteryBoss && !_isLevelCompleted) {
+      return '??? GİZEMLİ YADİGAR ???';
+    }
+    return _currentLevel.title;
+  }
 
   ui.Image? _cleanImage;
   ByteData? _cleanPixelData;
@@ -164,6 +184,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     await _initAudioAndHaptics();
     _currentLevel = LevelGenerator.generateLevel(_activePlayingLevelNum);
     await _loadLevelAssets();
+    _checkAndShowDailyLoginBonus();
   }
 
   String _getTodayDateString() {
@@ -171,8 +192,48 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
+  /// Her gün oyuna ilk girişte Günlük Ödül Penceresi açar!
+  Future<void> _checkAndShowDailyLoginBonus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String today = _getTodayDateString();
+    final String? lastRewardDate = prefs.getString('last_daily_reward_date');
+
+    if (lastRewardDate != today && mounted) {
+      _loginStreakDays = ((prefs.getInt('login_streak_days') ?? 0) % 7) + 1;
+      final int rewardCoins = 100 + (_loginStreakDays * 50);
+      final bool givesTicket = (_loginStreakDays % 3 == 0);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        GameModals.showDailyLoginRewardDialog(
+          context,
+          streakDay: _loginStreakDays,
+          rewardCoins: rewardCoins,
+          givesTicket: givesTicket,
+          onClaim: () async {
+            setState(() {
+              _totalCoins += rewardCoins;
+              if (givesTicket) _skipTickets++;
+            });
+            await prefs.setString('last_daily_reward_date', today);
+            await prefs.setInt('login_streak_days', _loginStreakDays);
+            await _saveProgress();
+          },
+        );
+      });
+    }
+  }
+
   Future<void> _loadSavedProgress() async {
     final prefs = await SharedPreferences.getInstance();
+
+    _playerId = prefs.getString('saved_player_id') ?? '';
+    if (_playerId.isEmpty) {
+      _playerId =
+          'user_${DateTime.now().millisecondsSinceEpoch}_${_random.nextInt(9999)}';
+      await prefs.setString('saved_player_id', _playerId);
+    }
+
     _playerName = prefs.getString('saved_player_name') ?? 'Usta_Oyuncu';
     _highestUnlockedLevel = prefs.getInt('saved_level') ?? 1;
     _activePlayingLevelNum = _highestUnlockedLevel;
@@ -183,7 +244,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _currentSkinId = prefs.getString('saved_skin') ?? 'skin_default';
     _isSoundEnabled = prefs.getBool('saved_sound_on') ?? true;
     _isHapticsEnabled = prefs.getBool('saved_haptics_on') ?? true;
-    _bestSpeedrunSeconds = prefs.getDouble('saved_best_speedrun') ?? 0.0;
 
     final List<String>? savedSkins = prefs.getStringList(
       'saved_unlocked_skins',
@@ -228,6 +288,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
   Future<void> _saveProgress() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('saved_player_id', _playerId);
     await prefs.setString('saved_player_name', _playerName);
     await prefs.setInt('saved_level', _highestUnlockedLevel);
     await prefs.setInt('saved_coins', _totalCoins);
@@ -244,7 +305,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     await prefs.setStringList('saved_trophies', _discoveredTrophyIds.toList());
     await prefs.setBool('saved_sound_on', _isSoundEnabled);
     await prefs.setBool('saved_haptics_on', _isHapticsEnabled);
-    await prefs.setDouble('saved_best_speedrun', _bestSpeedrunSeconds);
 
     for (final entry in _trophyCleanCounts.entries) {
       await prefs.setInt('trophy_count_${entry.key}', entry.value);
@@ -252,6 +312,28 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     for (final entry in _levelStars.entries) {
       await prefs.setInt('level_stars_${entry.key}', entry.value);
     }
+  }
+
+  void _openLeaderboard() {
+    final int totalStars = _levelStars.values.fold(0, (a, b) => a + b);
+    GameModals.showLeaderboardModal(
+      context,
+      currentPlayerId: _playerId,
+      currentPlayerName: _playerName,
+      currentLevelNumber: _currentLevel.levelNumber,
+      currentLevelTitle: _currentLevel.title,
+      userHighestLevel: _highestUnlockedLevel,
+      onUpdatePlayerName: (newName) {
+        setState(() => _playerName = newName);
+        _saveProgress();
+        LeaderboardService.submitCampaignProgress(
+          playerId: _playerId,
+          playerName: _playerName,
+          highestLevel: _highestUnlockedLevel,
+          totalStars: totalStars,
+        );
+      },
+    );
   }
 
   bool _isToolUnlocked(ScraperTool tool) {
@@ -312,15 +394,13 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
       final double angle = _random.nextDouble() * 2 * pi;
       final double speed = isUsingSteam
-          ? (0.6 + _random.nextDouble() * 2.0) // Buhar daha yumuşak dağılır
+          ? (0.6 + _random.nextDouble() * 2.0)
           : (1.2 + _random.nextDouble() * 4.2);
 
       final Offset velocity = isUsingSteam
           ? Offset(
               cos(angle) * speed + (dragDelta.dx * 0.1),
-              -1.2 -
-                  _random.nextDouble() *
-                      2.2, // Buhar bulutu doğrudan YUKARI yükselir!
+              -1.2 - _random.nextDouble() * 2.2,
             )
           : Offset(
               cos(angle) * speed + (dragDelta.dx * 0.15),
@@ -351,9 +431,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       }
 
       final double size = isUsingSteam
-          ? (7.0 +
-                _random.nextDouble() *
-                    8.0) // Buhar bulutları daha dolgun başlar
+          ? (7.0 + _random.nextDouble() * 8.0)
           : (3.5 + _random.nextDouble() * (tool.isVipJoker ? 6.5 : 5.0));
 
       _particles.add(
@@ -364,7 +442,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
           color: color,
           decay: 0.025 + _random.nextDouble() * 0.025,
           isSquare: tool.strokeCap == StrokeCap.square,
-          isSteamCloud: isUsingSteam, // Buhar fiziğini aktif et!
+          isSteamCloud: isUsingSteam,
         ),
       );
     }
@@ -388,6 +466,42 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _hasVibrator = hasVib ?? false;
   }
 
+  // ============================================================================
+  // BELLEK İÇİ OTOMATİK KARELEŞTİRİCİ (AUTO-SQUARE NORMALIZER)
+  // ============================================================================
+  Future<ui.Image> _normalizeToSquareImage(ui.Image rawImg) async {
+    const int targetSize = 1020;
+    if ((rawImg.width - rawImg.height).abs() <= 4 &&
+        rawImg.width == targetSize) {
+      return rawImg;
+    }
+
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
+
+    final double srcW = rawImg.width.toDouble();
+    final double srcH = rawImg.height.toDouble();
+
+    const double pad = targetSize * 0.06;
+    const double avail = targetSize - (pad * 2);
+    final double scale = min(avail / srcW, avail / srcH);
+
+    final double dstW = srcW * scale;
+    final double dstH = srcH * scale;
+    final double dx = (targetSize - dstW) * 0.5;
+    final double dy = (targetSize - dstH) * 0.5;
+
+    canvas.drawImageRect(
+      rawImg,
+      Rect.fromLTWH(0, 0, srcW, srcH),
+      Rect.fromLTWH(dx, dy, dstW, dstH),
+      Paint()..filterQuality = FilterQuality.high,
+    );
+
+    final ui.Picture picture = recorder.endRecording();
+    return picture.toImage(targetSize, targetSize);
+  }
+
   Future<void> _loadLevelAssets() async {
     _levelCountdownTimer?.cancel();
     _isTimerRunning = false;
@@ -409,18 +523,20 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       _selectedToolIndex = 0;
     }
 
-    final cleanImg = await _loadUiImage(_currentLevel.cleanAsset);
+    final rawCleanImg = await _loadUiImage(_currentLevel.cleanAsset);
+    final normalizedCleanImg = await _normalizeToSquareImage(rawCleanImg);
+
     final List<ui.Image> loadedStageImages = [];
     for (final stageConfig in _currentLevel.dirtStages) {
       loadedStageImages.add(await _loadUiImage(stageConfig.assetPath));
     }
 
-    final ByteData? pixelData = await cleanImg.toByteData(
+    final ByteData? pixelData = await normalizedCleanImg.toByteData(
       format: ui.ImageByteFormat.rawRgba,
     );
 
     if (mounted) {
-      _cleanImage = cleanImg;
+      _cleanImage = normalizedCleanImg;
       _stageDirtyImages = loadedStageImages;
       _cleanPixelData = pixelData;
       _strokes.clear();
@@ -480,16 +596,14 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     }
   }
 
-  /// Katman bittiğinde dokunuşu kilitler (`_waitingForFingerLift = true`)!
-  /// Böylece oyuncu elini çekip yeni aleti seçmeden bir sonraki katmanı yanlışlıkla silemez!
   void _advanceToNextDirtStage() {
     _stopScrapeFeedback();
-    _waitingForFingerLift = true; // ELİNİ ÇEKMEDEN DEVAM ETMESİNİ KİLİTLE!
+    _waitingForFingerLift = true;
     _activeFingerPos = null;
     _currentPath = null;
     _lastPanPosition = null;
 
-    _currentStageIndex++;
+    _currentStageIndex = (_currentStageIndex + 1).clamp(0, _totalStages - 1);
     _strokes.clear();
     _cleanedCellsInStage = 0;
     _stageCleanPercentage = 0.0;
@@ -606,7 +720,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
         if (_currentStageIndex + 1 < _totalStages) {
           _advanceToNextDirtStage();
         } else {
-          _completeEntireLevel(canvasSize);
+          _completeEntireLevel(canvasSize, wasSkipped: false);
         }
       }
     }
@@ -614,7 +728,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     return newlyScrapedAny;
   }
 
-  void _completeEntireLevel(double canvasSize) {
+  void _completeEntireLevel(double canvasSize, {required bool wasSkipped}) {
     _levelCountdownTimer?.cancel();
     _isTimerRunning = false;
     _isLevelCompleted = true;
@@ -626,29 +740,30 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _stopScrapeFeedback();
     _particles.clear();
 
-    if (_levelStartTimestamp != null) {
+    final int completedLvlNum = _currentLevel.levelNumber;
+
+    if (!wasSkipped && _levelStartTimestamp != null) {
       final int elapsedMs = DateTime.now()
           .difference(_levelStartTimestamp!)
           .inMilliseconds;
-      _lastClearedTimeSeconds = (elapsedMs / 1000.0).clamp(1.2, 99.0);
-      if (_bestSpeedrunSeconds <= 0.0 ||
-          _lastClearedTimeSeconds < _bestSpeedrunSeconds) {
-        _bestSpeedrunSeconds = _lastClearedTimeSeconds;
-      }
+      _lastClearedTimeSeconds = (elapsedMs / 1000.0).clamp(2.2, 99.0);
     } else {
-      _lastClearedTimeSeconds = 5.0;
+      _lastClearedTimeSeconds = 0.0;
     }
 
-    if (_currentLevel.timeLimitSeconds == null || _remainingSeconds == null) {
+    if (wasSkipped) {
+      _lastEarnedStars = 1;
+    } else if (_currentLevel.timeLimitSeconds == null ||
+        _remainingSeconds == null) {
       _lastEarnedStars = 3;
     } else {
       final double ratio = _remainingSeconds! / _currentLevel.timeLimitSeconds!;
       _lastEarnedStars = ratio >= 0.35 ? 3 : (ratio >= 0.15 ? 2 : 1);
     }
 
-    final int prevStars = _levelStars[_currentLevel.levelNumber] ?? 0;
+    final int prevStars = _levelStars[completedLvlNum] ?? 0;
     if (_lastEarnedStars > prevStars) {
-      _levelStars[_currentLevel.levelNumber] = _lastEarnedStars;
+      _levelStars[completedLvlNum] = _lastEarnedStars;
     }
 
     final String objId = _currentLevel.objectId;
@@ -666,6 +781,24 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     }
     _activePlayingLevelNum++;
     _saveProgress();
+
+    final int totalStars = _levelStars.values.fold(0, (a, b) => a + b);
+    LeaderboardService.submitCampaignProgress(
+      playerId: _playerId,
+      playerName: _playerName,
+      highestLevel: _highestUnlockedLevel,
+      totalStars: totalStars,
+    );
+
+    if (!wasSkipped && _lastClearedTimeSeconds >= 2.0) {
+      LeaderboardService.submitLevelSpeedrun(
+        levelNumber: completedLvlNum,
+        playerId: _playerId,
+        playerName: _playerName,
+        clearTimeSeconds: _lastClearedTimeSeconds,
+        highestLevel: _highestUnlockedLevel,
+      );
+    }
 
     if (isFirstDiscovery && mounted && !_isZenMode) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -777,7 +910,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         _remainingSeconds = 18;
                         _isTimerRunning = false;
                         _monetization.dailyAdUnlockedTools.add('mega');
-                        _selectedToolIndex = 5; // 6. alet Lazer!
+                        _selectedToolIndex = 5;
                       });
                       _startCountdownIfNeeded(canvasSize);
                     } else {
@@ -848,7 +981,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
           ),
         );
       }
-      _completeEntireLevel(canvasSize);
+      _completeEntireLevel(canvasSize, wasSkipped: true);
       return;
     }
 
@@ -865,7 +998,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
           ),
         );
       }
-      _completeEntireLevel(canvasSize);
+      _completeEntireLevel(canvasSize, wasSkipped: true);
       return;
     }
 
@@ -875,7 +1008,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     );
 
     if (watched && mounted) {
-      _completeEntireLevel(canvasSize);
+      _completeEntireLevel(canvasSize, wasSkipped: true);
     }
   }
 
@@ -891,6 +1024,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
     if (!mounted) return;
     setState(() {
+      _currentStageIndex =
+          0; // GÜVENLİK: Yeni seviyeye geçerken katman indeksini sıfırla!
       _currentLevel = LevelGenerator.generateLevel(_activePlayingLevelNum);
     });
     _loadLevelAssets();
@@ -915,7 +1050,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
     setState(() {
       _selectedToolIndex = index;
-      _waitingForFingerLift = false; // Yeni alet seçildiğinde kilidi aç!
+      _waitingForFingerLift = false;
       _wrongToolWarningMessage = null;
     });
   }
@@ -957,8 +1092,11 @@ class _ScraperGameHubState extends State<ScraperGameHub>
               ElevatedButton.icon(
                 onPressed: () async {
                   final prefs = await SharedPreferences.getInstance();
+                  final keepId = _playerId;
                   await prefs.clear();
+                  await prefs.setString('saved_player_id', keepId);
                   setState(() {
+                    _currentStageIndex = 0;
                     _highestUnlockedLevel = 1;
                     _activePlayingLevelNum = 1;
                     _totalCoins = 0;
@@ -1023,7 +1161,9 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     child: OutlinedButton(
                       onPressed: () async {
                         setState(() {
-                          _highestUnlockedLevel = (_highestUnlockedLevel + 10)
+                          _currentStageIndex =
+                              0; // GÜVENLİK: Önce indeksi sıfırla!
+                          _highestUnlockedLevel = (_highestUnlockedLevel + 5)
                               .clamp(1, 50);
                           _activePlayingLevelNum = _highestUnlockedLevel;
                           _currentLevel = LevelGenerator.generateLevel(
@@ -1034,7 +1174,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         if (ctx.mounted) Navigator.pop(ctx);
                         await _loadLevelAssets();
                       },
-                      child: const Text('+10 Seviye Atla'),
+                      child: const Text('+5 Seviye Atla'),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1049,76 +1189,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     ),
                   ),
                 ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showProPaywall() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF1A1A1A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.workspace_premium_rounded,
-                color: Colors.amber,
-                size: 56,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'PRO VIP PAKETİ',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                '• Tüm Zorunlu Geçiş Reklamlarını Kaldır\n'
-                '• 6 Aletin Hepsini (JOKER Lazer Dahil) Sv.1\'den İtibaren Aç!\n'
-                '• Her Gün 5 Adet Ücretsiz "Bölümü Atla" Hakkı!',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    final success = await _monetization.purchaseProPackage(
-                      context,
-                    );
-                    if (success && ctx.mounted) {
-                      await _saveProgress();
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      await _onSelectTool(5); // Lazer
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  child: const Text(
-                    'TEK TIKLA PRO OL (₺49.99)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-                  ),
-                ),
               ),
             ],
           ),
@@ -1440,7 +1510,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
   void _onPanStart(DragStartDetails details, double canvasSize) {
     if (_isLevelCompleted) return;
-    // Yeni bir dokunuş başladığında parmak kaldırma kilidini aç
     _waitingForFingerLift = false;
     _startCountdownIfNeeded(canvasSize);
     _lastPanPosition = details.localPosition;
@@ -1478,8 +1547,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   }
 
   void _onPanUpdate(DragUpdateDetails details, double canvasSize) {
-    // EĞER AZ ÖNCE BİR KATMAN BİTTİYSE VE KULLANICI ELİNİ ÇEKMEDEN KAYDIRMAYA DEVAM EDİYORSA:
-    // Yeni katmanı (Cila vb.) kazımasını %100 ENGELLE!
     if (_isLevelCompleted || _waitingForFingerLift) return;
 
     final Offset currentPos = details.localPosition;
@@ -1508,7 +1575,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       canvasSize,
     );
 
-    // Eğer _markCellsAlongLine sırasında katman bittiyse (_waitingForFingerLift == true olduysa) hemen çık!
     if (_waitingForFingerLift) return;
 
     if (details.delta.distance > 0.5) {
@@ -1615,21 +1681,12 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                           tooltip: 'Test Konsolu',
                         ),
                         IconButton(
-                          onPressed: () => GameModals.showLeaderboardModal(
-                            context,
-                            currentPlayerName: _playerName,
-                            userBestTimeSeconds: _bestSpeedrunSeconds,
-                            userHighestLevel: _highestUnlockedLevel,
-                            onUpdatePlayerName: (newName) {
-                              setState(() => _playerName = newName);
-                              _saveProgress();
-                            },
-                          ),
+                          onPressed: _openLeaderboard,
                           icon: const Icon(
                             Icons.emoji_events_rounded,
                             color: Colors.amber,
                           ),
-                          tooltip: 'Dünya Hız Sıralaması',
+                          tooltip: 'Canlı Dünya Sıralaması',
                         ),
                       ],
                     ),
@@ -1676,10 +1733,16 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         width: 2,
                       ),
                     ),
-                    child: Image.asset(
-                      _currentLevel.cleanAsset,
-                      fit: BoxFit.contain,
-                    ),
+                    child: _currentLevel.isMysteryBoss
+                        ? const Icon(
+                            Icons.help_outline_rounded,
+                            size: 72,
+                            color: Colors.purpleAccent,
+                          )
+                        : Image.asset(
+                            _currentLevel.cleanAsset,
+                            fit: BoxFit.contain,
+                          ),
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -1724,7 +1787,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _currentLevel.title,
+                        _displayedLevelTitle,
                         style: const TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
@@ -1772,6 +1835,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                           levelStars: _levelStars,
                           onSelectLevel: (lvl) {
                             setState(() {
+                              _currentStageIndex =
+                                  0; // GÜVENLİK: İndeksi sıfırla
                               _activePlayingLevelNum = lvl;
                               _isInMainMenu = false;
                               _currentLevel = LevelGenerator.generateLevel(lvl);
@@ -1787,19 +1852,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         icon: Icons.emoji_events_rounded,
                         color: Colors.orangeAccent,
                         title: 'SIRALAMA',
-                        subtitle: _bestSpeedrunSeconds <= 0
-                            ? 'Rekor Yok'
-                            : '${_bestSpeedrunSeconds.toStringAsFixed(1)}s',
-                        onTap: () => GameModals.showLeaderboardModal(
-                          context,
-                          currentPlayerName: _playerName,
-                          userBestTimeSeconds: _bestSpeedrunSeconds,
-                          userHighestLevel: _highestUnlockedLevel,
-                          onUpdatePlayerName: (newName) {
-                            setState(() => _playerName = newName);
-                            _saveProgress();
-                          },
-                        ),
+                        subtitle: 'SV.$_highestUnlockedLevel Liderlik',
+                        onTap: _openLeaderboard,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -1922,7 +1976,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                           color: Colors.greenAccent,
                           onTap: _showDeveloperDebugModal,
                         ),
-
                       Expanded(
                         child: _isZenMode
                             ? const SizedBox.shrink()
@@ -1934,6 +1987,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                   levelStars: _levelStars,
                                   onSelectLevel: (lvl) {
                                     setState(() {
+                                      _currentStageIndex =
+                                          0; // GÜVENLİK: İndeksi sıfırla
                                       _activePlayingLevelNum = lvl;
                                       _currentLevel =
                                           LevelGenerator.generateLevel(lvl);
@@ -1960,7 +2015,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                           ),
                                         ),
                                         Text(
-                                          _currentLevel.title,
+                                          _displayedLevelTitle,
                                           style: const TextStyle(
                                             fontSize: 15,
                                             fontWeight: FontWeight.bold,
@@ -1972,21 +2027,11 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                 ),
                               ),
                       ),
-
                       if (!_isZenMode) ...[
                         _buildSmallTopIconButton(
                           icon: Icons.emoji_events_rounded,
                           color: Colors.orangeAccent,
-                          onTap: () => GameModals.showLeaderboardModal(
-                            context,
-                            currentPlayerName: _playerName,
-                            userBestTimeSeconds: _bestSpeedrunSeconds,
-                            userHighestLevel: _highestUnlockedLevel,
-                            onUpdatePlayerName: (newName) {
-                              setState(() => _playerName = newName);
-                              _saveProgress();
-                            },
-                          ),
+                          onTap: _openLeaderboard,
                         ),
                         GestureDetector(
                           onTap: _showShopModal,
@@ -2053,7 +2098,9 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                 ),
                                 child: Text(
                                   _isLevelCompleted
-                                      ? '✨ SÜRE: ${_lastClearedTimeSeconds.toStringAsFixed(2)} SN (REKOR: ${_bestSpeedrunSeconds.toStringAsFixed(2)}s)'
+                                      ? (_lastClearedTimeSeconds > 0
+                                            ? '✨ SÜRE: ${_lastClearedTimeSeconds.toStringAsFixed(2)} SN (SIRALAMAYA KAYDEDİLDİ!)'
+                                            : '✨ BÖLÜM ATLANDI (+${_currentLevel.coinReward} 🪙)')
                                       : (_wrongToolWarningMessage ??
                                             'AŞAMA ${_currentStageIndex + 1}/$_totalStages: ${_activeStageDirtConfig.name.toUpperCase()} ➔ "${_activeStageDirtConfig.requiredToolName}" SEÇ'),
                                   maxLines: 1,
@@ -2251,7 +2298,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                   activeTool: _currentTool,
                                   effectiveBrushSize: _effectiveBrushSize,
                                   toolTiltAngle: _toolTiltAngle,
-                                  dirtOpacity: _dirtOpacity,
+                                  dirtOpacity: _effectiveDirtOpacity,
                                   activeSkin: _currentSkin,
                                   isFeverActive: _isFeverActive,
                                 ),
@@ -2334,7 +2381,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     );
   }
 
-  /// SABİT 6'LI ALET DOCK ÇUBUĞU (Sünger, Cila, Buhar, Jilet, Zımpara, Lazer)
   Widget _buildFixedSixToolDock() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0),

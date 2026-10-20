@@ -1,10 +1,16 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/scraper_game_hub.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint('Firebase başlatma uyarısı: $e');
+  }
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const SatisfyingScraperApp());
 }
 

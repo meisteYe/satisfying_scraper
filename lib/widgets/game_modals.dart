@@ -1,63 +1,136 @@
 import 'package:flutter/material.dart';
 import '../models/game_models.dart';
+import '../services/leaderboard_service.dart';
 
 class GameModals {
-  /// 🏆 CANLI OYUNCU SIRALAMASI (OVERFLOW HATASI %100 GİDERİLDİ + KULLANICI ADI DÜZENLEME EKLENDİ)
+  /// 🎁 GÜNLÜK GİRİŞ ÖDÜLÜ (7 GÜNLÜK SERİ BONUS PENCERESİ)
+  static void showDailyLoginRewardDialog(
+    BuildContext context, {
+    required int streakDay,
+    required int rewardCoins,
+    required bool givesTicket,
+    required VoidCallback onClaim,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF181822),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(26),
+            side: const BorderSide(color: Colors.amber, width: 2),
+          ),
+          title: const Column(
+            children: [
+              Icon(Icons.card_giftcard_rounded, color: Colors.amber, size: 54),
+              SizedBox(height: 8),
+              Text(
+                'GÜNLÜK ATÖLYE ÖDÜLÜ!',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.amber,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 20,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'GÜN $streakDay SERİ BONUSU',
+                style: const TextStyle(
+                  color: Colors.cyanAccent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '+$rewardCoins 🪙 ALTIN',
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.amber,
+                      ),
+                    ),
+                    if (givesTicket) ...[
+                      const SizedBox(height: 6),
+                      const Text(
+                        '+1 🎟️ ÜCRETSİZ ATLAMA BİLETİ!',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.purpleAccent,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Her gün oyuna girerek ödülünü katla!',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  onClaim();
+                  Navigator.pop(ctx);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                child: const Text(
+                  'ÖDÜLÜ TOPLA!',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 🏆 2 SEKMELİ CANLI DÜNYA SIRALAMASI (1: KAMPANYA LİDERLERİ | 2: BU SEVİYENİN EN HIZLILARI)
   static void showLeaderboardModal(
     BuildContext context, {
+    required String currentPlayerId,
     required String currentPlayerName,
-    required double userBestTimeSeconds,
+    required int currentLevelNumber,
+    required String currentLevelTitle,
     required int userHighestLevel,
     required ValueChanged<String> onUpdatePlayerName,
   }) {
-    final List<LeaderboardEntry> competitors = [
-      const LeaderboardEntry(
-        playerName: 'Emir_01',
-        countryFlag: '🇹🇷',
-        bestTimeSeconds: 3.92,
-        totalLevelsCleared: 50,
-      ),
-      const LeaderboardEntry(
-        playerName: 'NeoScraper_JP',
-        countryFlag: '🇯🇵',
-        bestTimeSeconds: 4.15,
-        totalLevelsCleared: 48,
-      ),
-      const LeaderboardEntry(
-        playerName: 'KralRestorator',
-        countryFlag: '🇹🇷',
-        bestTimeSeconds: 4.65,
-        totalLevelsCleared: 45,
-      ),
-      const LeaderboardEntry(
-        playerName: 'BlitzCleaner',
-        countryFlag: '🇩🇪',
-        bestTimeSeconds: 5.10,
-        totalLevelsCleared: 42,
-      ),
-      const LeaderboardEntry(
-        playerName: 'ZenMaster_KR',
-        countryFlag: '🇰🇷',
-        bestTimeSeconds: 5.88,
-        totalLevelsCleared: 39,
-      ),
-      const LeaderboardEntry(
-        playerName: 'RustBuster99',
-        countryFlag: '🇬🇧',
-        bestTimeSeconds: 6.45,
-        totalLevelsCleared: 31,
-      ),
-      LeaderboardEntry(
-        playerName: currentPlayerName,
-        countryFlag: '🇹🇷',
-        bestTimeSeconds: userBestTimeSeconds <= 0 ? 99.9 : userBestTimeSeconds,
-        totalLevelsCleared: userHighestLevel,
-        isCurrentUser: true,
-      ),
-    ];
-
-    competitors.sort((a, b) => a.bestTimeSeconds.compareTo(b.bestTimeSeconds));
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -66,104 +139,49 @@ class GameModals {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.78,
-          minChildSize: 0.5,
-          maxChildSize: 0.92,
-          builder: (context, scrollController) {
-            return Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                children: [
-                  // ÜST BAŞLIK SATIRI: Expanded kullanılarak 17 piksellik taşma %100 engellendi!
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.emoji_events_rounded,
-                        color: Colors.amber,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'DÜNYA HIZ SIRALAMASI',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            Text(
-                              'En Hızlı Seviye Temizleme Rekorları',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.white54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.greenAccent.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.greenAccent.withValues(alpha: 0.5),
-                          ),
-                        ),
-                        child: Text(
-                          userBestTimeSeconds <= 0
-                              ? 'REKOR YOK'
-                              : '${userBestTimeSeconds.toStringAsFixed(2)}s',
-                          style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // KULLANICI ADI (NICKNAME) DEĞİŞTİRME ŞERİDİ
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Row(
+        return DefaultTabController(
+          length: 2,
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.82,
+            minChildSize: 0.5,
+            maxChildSize: 0.94,
+            builder: (context, scrollController) {
+              return Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    Row(
                       children: [
                         const Icon(
-                          Icons.person_rounded,
-                          color: Colors.cyanAccent,
-                          size: 18,
+                          Icons.emoji_events_rounded,
+                          color: Colors.amber,
+                          size: 28,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Oyuncu Adın: $currentPlayerName',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'CANLI DÜNYA SIRALAMASI',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              Text(
+                                'Gerçek Oyuncular • Firebase Canlı Veritabanı',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.greenAccent,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         TextButton.icon(
@@ -197,9 +215,8 @@ class GameModals {
                                   ElevatedButton(
                                     onPressed: () {
                                       final newName = controller.text.trim();
-                                      if (newName.isNotEmpty) {
+                                      if (newName.isNotEmpty)
                                         onUpdatePlayerName(newName);
-                                      }
                                       Navigator.pop(dCtx);
                                       Navigator.pop(ctx);
                                     },
@@ -218,121 +235,237 @@ class GameModals {
                             size: 14,
                             color: Colors.amber,
                           ),
-                          label: const Text(
-                            'Adı Değiştir',
-                            style: TextStyle(color: Colors.amber, fontSize: 11),
+                          label: Text(
+                            currentPlayerName,
+                            style: const TextStyle(
+                              color: Colors.amber,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 10),
 
-                  Expanded(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      itemCount: competitors.length,
-                      itemBuilder: (context, index) {
-                        final entry = competitors[index];
-                        final int rank = index + 1;
+                    // 2 SEKME SEÇİCİ: GENEL SEVİYE LİDERLERİ vs BU SEVİYENİN HIZ REKORU!
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: TabBar(
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicator: BoxDecoration(
+                          color: Colors.amber,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        labelColor: Colors.black,
+                        unselectedLabelColor: Colors.white70,
+                        labelStyle: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 11,
+                        ),
+                        tabs: [
+                          const Tab(text: '👑 KAMPANYA LİDERLERİ'),
+                          Tab(text: '⚡ SEVİYE $currentLevelNumber HIZ REKORU'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
 
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: entry.isCurrentUser
-                                ? Colors.amber.withValues(alpha: 0.2)
-                                : Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: entry.isCurrentUser
-                                  ? Colors.amber
-                                  : Colors.white12,
-                              width: entry.isCurrentUser ? 2.0 : 1.0,
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          // SEKME 1: GENEL KAMPANYA LİDERLERİ (Ulaşılan Seviye & Yıldız)
+                          StreamBuilder<List<LeaderboardEntry>>(
+                            stream: LeaderboardService.streamCampaignLeaders(
+                              currentPlayerId,
                             ),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Colors.amber,
+                                  ),
+                                );
+                              }
+                              final players = snapshot.data ?? [];
+                              if (players.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    'Henüz sıralama kaydı yok.\nBir seviye tamamlayarak liderliği ele geçir!',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                );
+                              }
+                              return ListView.builder(
+                                controller: scrollController,
+                                itemCount: players.length,
+                                itemBuilder: (context, index) {
+                                  final entry = players[index];
+                                  final int rank = index + 1;
+                                  return _buildLeaderboardRow(
+                                    rank: rank,
+                                    entry: entry,
+                                    rightBadgeText:
+                                        'SV.${entry.totalLevelsCleared} • ⭐${entry.totalStars}',
+                                  );
+                                },
+                              );
+                            },
                           ),
-                          child: Row(
+
+                          // SEKME 2: SADECE BU SEVİYENİN (SV.X) SPEEDRUN HIZ REKORLARI!
+                          Column(
                             children: [
                               Container(
-                                width: 30,
-                                height: 30,
-                                alignment: Alignment.center,
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(8),
+                                margin: const EdgeInsets.only(bottom: 8),
                                 decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: rank == 1
-                                      ? Colors.amber
-                                      : (rank == 2
-                                            ? Colors.grey.shade400
-                                            : (rank == 3
-                                                  ? Colors.brown.shade400
-                                                  : Colors.white10)),
+                                  color: Colors.cyanAccent.withValues(
+                                    alpha: 0.1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
-                                  '$rank',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    color: rank <= 3
-                                        ? Colors.black
-                                        : Colors.white,
+                                  'Sadece Seviye $currentLevelNumber ($currentLevelTitle) bölümünü "Atla" kullanmadan en hızlı bitirenler!',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    color: Colors.cyanAccent,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Text(
-                                entry.countryFlag,
-                                style: const TextStyle(fontSize: 20),
-                              ),
-                              const SizedBox(width: 10),
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      entry.playerName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w900,
-                                        color: entry.isCurrentUser
-                                            ? Colors.amber
-                                            : Colors.white,
+                                child: StreamBuilder<List<LeaderboardEntry>>(
+                                  stream:
+                                      LeaderboardService.streamLevelSpeedruns(
+                                        currentLevelNumber,
+                                        currentPlayerId,
                                       ),
-                                    ),
-                                    Text(
-                                      'Ulaşılan Seviye: ${entry.totalLevelsCleared}',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.white54,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Text(
-                                entry.bestTimeSeconds >= 99.0
-                                    ? '--.-- sn'
-                                    : '⚡ ${entry.bestTimeSeconds.toStringAsFixed(2)} sn',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 13,
-                                  color: Colors.cyanAccent,
+                                  builder: (context, snapshot) {
+                                    if (snapshot.connectionState ==
+                                        ConnectionState.waiting) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(
+                                          color: Colors.amber,
+                                        ),
+                                      );
+                                    }
+                                    final players = snapshot.data ?? [];
+                                    if (players.isEmpty) {
+                                      return Center(
+                                        child: Text(
+                                          'Seviye $currentLevelNumber için henüz hız rekoru kırılmadı!\nBu seviyeyi tamamla ve ilk rekoru sen koy! ⚡',
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return ListView.builder(
+                                      itemCount: players.length,
+                                      itemBuilder: (context, index) {
+                                        final entry = players[index];
+                                        final int rank = index + 1;
+                                        return _buildLeaderboardRow(
+                                          rank: rank,
+                                          entry: entry,
+                                          rightBadgeText:
+                                              '⚡ ${entry.bestTimeSeconds.toStringAsFixed(2)} sn',
+                                        );
+                                      },
+                                    );
+                                  },
                                 ),
                               ),
                             ],
                           ),
-                        );
-                      },
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
+                  ],
+                ),
+              );
+            },
+          ),
         );
       },
+    );
+  }
+
+  static Widget _buildLeaderboardRow({
+    required int rank,
+    required LeaderboardEntry entry,
+    required String rightBadgeText,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: entry.isCurrentUser
+            ? Colors.amber.withValues(alpha: 0.2)
+            : Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: entry.isCurrentUser ? Colors.amber : Colors.white12,
+          width: entry.isCurrentUser ? 2.0 : 1.0,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: rank == 1
+                  ? Colors.amber
+                  : (rank == 2
+                        ? Colors.grey.shade400
+                        : (rank == 3 ? Colors.brown.shade400 : Colors.white10)),
+            ),
+            child: Text(
+              '$rank',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: rank <= 3 ? Colors.black : Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(entry.countryFlag, style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              entry.isCurrentUser
+                  ? '${entry.playerName} (SEN)'
+                  : entry.playerName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: entry.isCurrentUser ? Colors.amber : Colors.white,
+              ),
+            ),
+          ),
+          Text(
+            rightBadgeText,
+            style: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+              color: Colors.cyanAccent,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -386,7 +519,7 @@ class GameModals {
                               ),
                             ),
                             Text(
-                              'Her 10 seviyede yeni bir uzman alet açılır!',
+                              '20 Eşsiz Nesne • Her 5 Seviyede Gizemli Boss!',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -492,7 +625,7 @@ class GameModals {
                               children: [
                                 if (isBoss)
                                   Icon(
-                                    Icons.workspace_premium_rounded,
+                                    Icons.help_outline_rounded,
                                     size: 13,
                                     color: isCurrent
                                         ? Colors.black
@@ -548,7 +681,7 @@ class GameModals {
     );
   }
 
-  /// 🏛️ HAZİNE MÜZESİ
+  /// 🏛️ 20 NESNELİ HAZİNE MÜZESİ
   static void showTrophyRoomModal(
     BuildContext context, {
     required Set<String> discoveredTrophyIds,
@@ -567,9 +700,9 @@ class GameModals {
 
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.78,
+          initialChildSize: 0.82,
           minChildSize: 0.5,
-          maxChildSize: 0.92,
+          maxChildSize: 0.94,
           builder: (context, scrollController) {
             return Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
@@ -588,7 +721,7 @@ class GameModals {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'HAZİNE MÜZESİ',
+                              'HAZİNE MÜZESİ (20 ESER)',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -640,7 +773,7 @@ class GameModals {
                             crossAxisCount: 2,
                             mainAxisSpacing: 14,
                             crossAxisSpacing: 14,
-                            childAspectRatio: 0.78,
+                            childAspectRatio: 0.80,
                           ),
                       itemCount: TrophyItem.allTrophies.length,
                       itemBuilder: (context, index) {
@@ -708,8 +841,8 @@ class GameModals {
                               ),
                               const Spacer(),
                               SizedBox(
-                                height: 92,
-                                width: 92,
+                                height: 88,
+                                width: 88,
                                 child: Stack(
                                   alignment: Alignment.center,
                                   children: [
@@ -759,13 +892,13 @@ class GameModals {
                               Text(
                                 isDiscovered
                                     ? trophy.title
-                                    : '??? GİZEMLİ NESNE',
+                                    : '??? GİZEMLİ ESER',
                                 textAlign: TextAlign.center,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontWeight: FontWeight.w900,
-                                  fontSize: 12,
+                                  fontSize: 11.5,
                                   color: isDiscovered
                                       ? Colors.white
                                       : Colors.white38,
@@ -775,9 +908,9 @@ class GameModals {
                               Text(
                                 isDiscovered
                                     ? '$cleanCount Kez Parlatıldı ✨'
-                                    : 'Seviye ${trophy.requiredLevelToDiscover}\'de Açılır',
+                                    : 'Seviye ${trophy.requiredLevelToDiscover}\'de Keşfedilir',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 9.5,
                                   fontWeight: FontWeight.bold,
                                   color: isDiscovered
                                       ? Colors.amber
