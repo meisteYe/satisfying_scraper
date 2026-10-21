@@ -3,7 +3,226 @@ import '../models/game_models.dart';
 import '../services/leaderboard_service.dart';
 
 class GameModals {
-  /// 🎁 GÜNLÜK GİRİŞ ÖDÜLÜ (7 GÜNLÜK SERİ BONUS PENCERESİ)
+  /// 🎯 GÖREV VE BAŞARIMLAR PENCERESİ (QUESTS & ACHIEVEMENTS)
+  static void showQuestsModal(
+    BuildContext context, {
+    required int highestLevel,
+    required int goldenSpotsHit,
+    required int feverTriggeredCount,
+    required int discoveredTrophiesCount,
+    required Set<String> claimedQuestIds,
+    required void Function(QuestItem quest) onClaimQuest,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF14141A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            int getProgress(String questId) {
+              switch (questId) {
+                case 'quest_levels_5':
+                case 'quest_levels_25':
+                  return highestLevel - 1;
+                case 'quest_golden_3':
+                  return goldenSpotsHit;
+                case 'quest_fever_5':
+                  return feverTriggeredCount;
+                case 'quest_trophies_10':
+                  return discoveredTrophiesCount;
+                default:
+                  return 0;
+              }
+            }
+
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.75,
+              minChildSize: 0.5,
+              maxChildSize: 0.9,
+              builder: (context, scrollController) {
+                return Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.flag_rounded,
+                            color: Colors.amber,
+                            size: 28,
+                          ),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'GÖREVLER & BAŞARIMLAR',
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                Text(
+                                  'Hedefleri tamamla, ekstra altın ödüllerini topla!',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: ListView.builder(
+                          controller: scrollController,
+                          itemCount: QuestItem.allQuests.length,
+                          itemBuilder: (context, index) {
+                            final q = QuestItem.allQuests[index];
+                            final int current = getProgress(
+                              q.id,
+                            ).clamp(0, q.targetValue);
+                            final bool isCompleted = current >= q.targetValue;
+                            final bool isClaimed = claimedQuestIds.contains(
+                              q.id,
+                            );
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: isClaimed
+                                    ? Colors.white.withValues(alpha: 0.03)
+                                    : (isCompleted
+                                          ? Colors.amber.withValues(alpha: 0.14)
+                                          : Colors.white.withValues(
+                                              alpha: 0.06,
+                                            )),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: isClaimed
+                                      ? Colors.white12
+                                      : (isCompleted
+                                            ? Colors.amber
+                                            : Colors.white24),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: isCompleted
+                                        ? Colors.amber
+                                        : Colors.white10,
+                                    child: Icon(
+                                      q.icon,
+                                      color: isCompleted
+                                          ? Colors.black
+                                          : Colors.amber,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          q.title,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        Text(
+                                          q.description,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          child: LinearProgressIndicator(
+                                            value: current / q.targetValue,
+                                            minHeight: 6,
+                                            backgroundColor: Colors.white12,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                  isCompleted
+                                                      ? Colors.greenAccent
+                                                      : Colors.amber,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          'İlerleme: $current / ${q.targetValue}',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white54,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  ElevatedButton(
+                                    onPressed: (isCompleted && !isClaimed)
+                                        ? () {
+                                            onClaimQuest(q);
+                                            setModalState(() {});
+                                          }
+                                        : null,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isClaimed
+                                          ? Colors.white12
+                                          : (isCompleted
+                                                ? Colors.greenAccent
+                                                : Colors.white12),
+                                      foregroundColor: Colors.black,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      isClaimed
+                                          ? 'ALINDI'
+                                          : '+${q.rewardCoins} 🪙',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 🎁 GÜNLÜK GİRİŞ ÖDÜLÜ
   static void showDailyLoginRewardDialog(
     BuildContext context, {
     required int streakDay,
@@ -84,15 +303,8 @@ class GameModals {
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              const Text(
-                'Her gün oyuna girerek ödülünü katla!',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
             ],
           ),
-          actionsAlignment: MainAxisAlignment.center,
           actions: [
             SizedBox(
               width: double.infinity,
@@ -121,7 +333,7 @@ class GameModals {
     );
   }
 
-  /// 🏆 2 SEKMELİ CANLI DÜNYA SIRALAMASI (1: KAMPANYA LİDERLERİ | 2: BU SEVİYENİN EN HIZLILARI)
+  /// 🏆 2 SEKMELİ CANLI DÜNYA SIRALAMASI
   static void showLeaderboardModal(
     BuildContext context, {
     required String currentPlayerId,
@@ -247,8 +459,6 @@ class GameModals {
                       ],
                     ),
                     const SizedBox(height: 10),
-
-                    // 2 SEKME SEÇİCİ: GENEL SEVİYE LİDERLERİ vs BU SEVİYENİN HIZ REKORU!
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.06),
@@ -273,11 +483,9 @@ class GameModals {
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     Expanded(
                       child: TabBarView(
                         children: [
-                          // SEKME 1: GENEL KAMPANYA LİDERLERİ (Ulaşılan Seviye & Yıldız)
                           StreamBuilder<List<LeaderboardEntry>>(
                             stream: LeaderboardService.streamCampaignLeaders(
                               currentPlayerId,
@@ -317,8 +525,6 @@ class GameModals {
                               );
                             },
                           ),
-
-                          // SEKME 2: SADECE BU SEVİYENİN (SV.X) SPEEDRUN HIZ REKORLARI!
                           Column(
                             children: [
                               Container(

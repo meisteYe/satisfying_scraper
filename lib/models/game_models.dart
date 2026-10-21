@@ -20,7 +20,6 @@ class TrophyItem {
     required this.lore,
   });
 
-  // 20 EŞSİZ NESNELİ DEV MÜZE KOLEKSİYONU!
   static const List<TrophyItem> allTrophies = [
     TrophyItem(
       id: 'elmas',
@@ -201,6 +200,122 @@ class TrophyItem {
       rarityColor: Colors.redAccent,
       requiredLevelToDiscover: 25,
       lore: 'Hangarda yıllarca oksitlenmiş süpersonik avcı uçağı.',
+    ),
+  ];
+}
+
+/// 🎨 ATÖLYE MASASI / ARKA PLAN TEMA MODELİ
+class WorkshopTheme {
+  final String id;
+  final String name;
+  final int price;
+  final List<Color> bgGradient;
+  final Color accentColor;
+  final IconData icon;
+
+  const WorkshopTheme({
+    required this.id,
+    required this.name,
+    required this.price,
+    required this.bgGradient,
+    required this.accentColor,
+    required this.icon,
+  });
+
+  static const List<WorkshopTheme> allThemes = [
+    WorkshopTheme(
+      id: 'theme_default',
+      name: 'Gece Atölyesi',
+      price: 0,
+      bgGradient: [Color(0xFF231D2E), Color(0xFF101014)],
+      accentColor: Colors.amber,
+      icon: Icons.nightlight_round,
+    ),
+    WorkshopTheme(
+      id: 'theme_wood',
+      name: 'Klasik Ahşap Masa',
+      price: 350,
+      bgGradient: [Color(0xFF3E2723), Color(0xFF1B0F0D)],
+      accentColor: Color(0xFFFFB74D),
+      icon: Icons.carpenter_rounded,
+    ),
+    WorkshopTheme(
+      id: 'theme_cyber',
+      name: 'Siberpunk Laboratuvar',
+      price: 550,
+      bgGradient: [Color(0xFF0D1B2A), Color(0xFF1B0624)],
+      accentColor: Colors.cyanAccent,
+      icon: Icons.hub_rounded,
+    ),
+    WorkshopTheme(
+      id: 'theme_royal',
+      name: 'Kraliyet Mermeri',
+      price: 800,
+      bgGradient: [Color(0xFF00332C), Color(0xFF071412)],
+      accentColor: Colors.greenAccent,
+      icon: Icons.account_balance_rounded,
+    ),
+  ];
+}
+
+/// 🎯 GÖREV VE BAŞARIM MODELİ
+class QuestItem {
+  final String id;
+  final String title;
+  final String description;
+  final int targetValue;
+  final int rewardCoins;
+  final IconData icon;
+
+  const QuestItem({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.targetValue,
+    required this.rewardCoins,
+    required this.icon,
+  });
+
+  static const List<QuestItem> allQuests = [
+    QuestItem(
+      id: 'quest_levels_5',
+      title: 'Çırak Restoratör',
+      description: 'Toplam 5 Seviye tamamla',
+      targetValue: 5,
+      rewardCoins: 60, // Ödüller dengelendi (250 -> 60)
+      icon: Icons.verified_rounded,
+    ),
+    QuestItem(
+      id: 'quest_golden_3',
+      title: 'Elmas Avcısı',
+      description: 'Kazı sırasında 3 kez Elmas Damarı (Golden Spot) yakala',
+      targetValue: 3,
+      rewardCoins: 80, // Ödüller dengelendi (350 -> 80)
+      icon: Icons.diamond_rounded,
+    ),
+    QuestItem(
+      id: 'quest_fever_5',
+      title: 'Alevli Bilek',
+      description: '5 kez Fever 2x Kombo modunu aktifleştir',
+      targetValue: 5,
+      rewardCoins: 90, // Ödüller dengelendi (400 -> 90)
+      icon: Icons.local_fire_department_rounded,
+    ),
+    QuestItem(
+      id: 'quest_trophies_10',
+      title: 'Müze Küratörü',
+      description: 'Hazine Müzesinde 10 farklı eseri keşfet',
+      targetValue: 10,
+      rewardCoins: 150, // Ödüller dengelendi (600 -> 150)
+      icon: Icons.museum_rounded,
+    ),
+    QuestItem(
+      id: 'quest_levels_25',
+      title: 'Baş Usta',
+      description: 'Seviye 25\'e ulaş',
+      targetValue: 25,
+      rewardCoins: 250, // Ödüller dengelendi (1000 -> 250)
+      icon: Icons.workspace_premium_rounded,
     ),
   ];
 }
@@ -528,8 +643,7 @@ class GeneratedLevel {
   final String difficultyLabel;
   final Color difficultyColor;
   final bool isBossLevel;
-  final bool
-  isMysteryBoss; // Yeni: Gizemli Boss mu? (Başta adı ??? olur, bitince açıklanır!)
+  final bool isMysteryBoss;
   final String cleanAsset;
   final List<DirtLayerConfig> dirtStages;
   final int coinReward;

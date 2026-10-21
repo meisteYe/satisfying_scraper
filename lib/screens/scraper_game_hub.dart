@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:confetti/confetti.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -38,6 +39,30 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   Map<String, int> _trophyCleanCounts = {};
   Map<int, int> _levelStars = {};
 
+  // --- GÖREV VE TEMA DURUMLARI ---
+  int _goldenSpotsHitCount = 0;
+  int _feverTriggeredCount = 0;
+  Set<String> _claimedQuestIds = {};
+
+  final List<WorkshopTheme> _themes = WorkshopTheme.allThemes;
+  List<String> _unlockedThemeIds = ['theme_default'];
+  String _currentThemeId = 'theme_default';
+  WorkshopTheme get _currentTheme => _themes.firstWhere(
+    (t) => t.id == _currentThemeId,
+    orElse: () => _themes.first,
+  );
+
+  // --- 💎 GOLDEN SPOT DURUMLARI (İSTİSMAR KORUMALARI) ---
+  Offset? _goldenSpotNormalized;
+  int _collectedGoldenSpotCoinsThisLevelAttempt = 0;
+
+  // UX Bilgi Şeridi için Dinamik Durumlar (Alttaki çirkin Snackbar'lar yerine)
+  String _uxRibbonMessage = '';
+  Color _uxRibbonBgColor = Colors.cyan.shade900.withValues(alpha: 0.15);
+  Color _uxRibbonTextColor = Colors.cyanAccent;
+  IconData _uxRibbonIcon = Icons.info_outline_rounded;
+  Timer? _uxRibbonTimer;
+
   final List<ScraperTool> _tools = ScraperTool.allTools;
   final List<ToolSkin> _skins = ToolSkin.allSkins;
 
@@ -51,7 +76,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   int _brushPowerUpgradeLevel = 0;
   int _selectedToolIndex = 0;
 
-  // Günlük giriş ödülü serisi
   int _loginStreakDays = 1;
 
   DateTime? _levelStartTimestamp;
@@ -72,7 +96,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   int _currentStageIndex = 0;
   int get _totalStages => _currentLevel.dirtStages.length;
 
-  // GÜVENLİ KALKAN (.clamp): Seviye geçişlerinde asla RangeError fırlatmaz!
   DirtLayerConfig get _activeStageDirtConfig =>
       _currentLevel.dirtStages[_currentStageIndex.clamp(
         0,
@@ -105,7 +128,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
   double _toolTiltAngle = 0.25;
   bool _isShowingBefore = false;
 
-  // Gizemli Boss modunda kir başlangıçta %96 opak olur ki alttaki nesne görünmesin!
   double get _effectiveDirtOpacity {
     if (_currentLevel.isMysteryBoss &&
         !_isLevelCompleted &&
@@ -115,7 +137,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     return 0.75;
   }
 
-  /// Gizemli Boss modunda bölüm bitene kadar nesnenin adı '??? GİZEMLİ YADİGAR ???' olarak gizlenir!
   String get _displayedLevelTitle {
     if (_currentLevel.isMysteryBoss && !_isLevelCompleted) {
       return '??? GİZEMLİ YADİGAR ???';
@@ -192,7 +213,39 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
-  /// Her gün oyuna ilk girişte Günlük Ödül Penceresi açar!
+  String _computeIntegritySeal(int coins, int level, bool isPro) {
+    final int raw =
+        (coins * 31) ^ (level * 997) ^ (isPro ? 7919 : 1013) ^ 0x5A7F;
+    return raw.toRadixString(16);
+  }
+
+  /// UX Şeridini güvenli bir şekilde güncelleyen yardımcı fonksiyon
+  void _updateUxRibbon({
+    required String message,
+    IconData icon = Icons.info_outline_rounded,
+    Color? bgColor,
+    Color textColor = Colors.cyanAccent,
+    int durationMs = 2500,
+  }) {
+    _uxRibbonTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _uxRibbonMessage = message;
+      _uxRibbonIcon = icon;
+      _uxRibbonBgColor =
+          bgColor ?? Colors.cyan.shade900.withValues(alpha: 0.15);
+      _uxRibbonTextColor = textColor;
+    });
+
+    _uxRibbonTimer = Timer(Duration(milliseconds: durationMs), () {
+      if (mounted) {
+        setState(() {
+          _uxRibbonMessage = '';
+        });
+      }
+    });
+  }
+
   Future<void> _checkAndShowDailyLoginBonus() async {
     final prefs = await SharedPreferences.getInstance();
     final String today = _getTodayDateString();
@@ -200,8 +253,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
     if (lastRewardDate != today && mounted) {
       _loginStreakDays = ((prefs.getInt('login_streak_days') ?? 0) % 7) + 1;
-      final int rewardCoins = 100 + (_loginStreakDays * 50);
-      final bool givesTicket = (_loginStreakDays % 3 == 0);
+      final int rewardCoins = 35 + (_loginStreakDays * 15);
+      final bool givesTicket = (_loginStreakDays % 4 == 0);
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -228,27 +281,56 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     final prefs = await SharedPreferences.getInstance();
 
     _playerId = prefs.getString('saved_player_id') ?? '';
-    if (_playerId.isEmpty) {
-      _playerId =
-          'user_${DateTime.now().millisecondsSinceEpoch}_${_random.nextInt(9999)}';
+    if (_playerId.isEmpty || _playerId.startsWith('user_')) {
+      final secureRandom = Random.secure();
+      final bytes = List<int>.generate(16, (_) => secureRandom.nextInt(256));
+      _playerId = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
       await prefs.setString('saved_player_id', _playerId);
     }
 
     _playerName = prefs.getString('saved_player_name') ?? 'Usta_Oyuncu';
-    _highestUnlockedLevel = prefs.getInt('saved_level') ?? 1;
+    final int loadedLevel = prefs.getInt('saved_level') ?? 1;
+    final int loadedCoins = prefs.getInt('saved_coins') ?? 0;
+    final bool loadedPro = prefs.getBool('saved_is_pro') ?? false;
+    final String? savedSeal = prefs.getString('saved_integrity_seal');
+
+    if (savedSeal != null &&
+        savedSeal !=
+            _computeIntegritySeal(loadedCoins, loadedLevel, loadedPro)) {
+      _highestUnlockedLevel = 1;
+      _totalCoins = 0;
+      _monetization.isProUser = false;
+    } else {
+      _highestUnlockedLevel = loadedLevel;
+      _totalCoins = loadedCoins;
+      _monetization.isProUser = loadedPro;
+    }
+
     _activePlayingLevelNum = _highestUnlockedLevel;
-    _totalCoins = prefs.getInt('saved_coins') ?? 0;
     _skipTickets = prefs.getInt('saved_skip_tickets') ?? 0;
     _brushPowerUpgradeLevel = prefs.getInt('saved_power_upgrade') ?? 0;
-    _monetization.isProUser = prefs.getBool('saved_is_pro') ?? false;
     _currentSkinId = prefs.getString('saved_skin') ?? 'skin_default';
+    _currentThemeId = prefs.getString('saved_theme') ?? 'theme_default';
     _isSoundEnabled = prefs.getBool('saved_sound_on') ?? true;
     _isHapticsEnabled = prefs.getBool('saved_haptics_on') ?? true;
+
+    _goldenSpotsHitCount = prefs.getInt('saved_golden_hits') ?? 0;
+    _feverTriggeredCount = prefs.getInt('saved_fever_count') ?? 0;
+
+    final List<String>? savedQuests = prefs.getStringList(
+      'saved_claimed_quests',
+    );
+    if (savedQuests != null) _claimedQuestIds = savedQuests.toSet();
 
     final List<String>? savedSkins = prefs.getStringList(
       'saved_unlocked_skins',
     );
     if (savedSkins != null) _unlockedSkinIds = savedSkins;
+
+    final List<String>? savedThemes = prefs.getStringList(
+      'saved_unlocked_themes',
+    );
+    if (savedThemes != null) _unlockedThemeIds = savedThemes;
 
     final List<String>? savedTrophies = prefs.getStringList('saved_trophies');
     if (savedTrophies != null) _discoveredTrophyIds = savedTrophies.toSet();
@@ -295,8 +377,18 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     await prefs.setInt('saved_skip_tickets', _skipTickets);
     await prefs.setInt('saved_power_upgrade', _brushPowerUpgradeLevel);
     await prefs.setBool('saved_is_pro', _monetization.isProUser);
+    await prefs.setString(
+      'saved_integrity_seal',
+      _computeIntegritySeal(
+        _totalCoins,
+        _highestUnlockedLevel,
+        _monetization.isProUser,
+      ),
+    );
     await prefs.setString('saved_skin', _currentSkinId);
+    await prefs.setString('saved_theme', _currentThemeId);
     await prefs.setStringList('saved_unlocked_skins', _unlockedSkinIds);
+    await prefs.setStringList('saved_unlocked_themes', _unlockedThemeIds);
     await prefs.setInt('saved_pro_skips', _monetization.remainingProSkipsToday);
     await prefs.setStringList(
       'saved_daily_tools',
@@ -305,6 +397,12 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     await prefs.setStringList('saved_trophies', _discoveredTrophyIds.toList());
     await prefs.setBool('saved_sound_on', _isSoundEnabled);
     await prefs.setBool('saved_haptics_on', _isHapticsEnabled);
+    await prefs.setInt('saved_golden_hits', _goldenSpotsHitCount);
+    await prefs.setInt('saved_fever_count', _feverTriggeredCount);
+    await prefs.setStringList(
+      'saved_claimed_quests',
+      _claimedQuestIds.toList(),
+    );
 
     for (final entry in _trophyCleanCounts.entries) {
       await prefs.setInt('trophy_count_${entry.key}', entry.value);
@@ -336,7 +434,34 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     );
   }
 
+  void _openQuestsModal() {
+    GameModals.showQuestsModal(
+      context,
+      highestLevel: _highestUnlockedLevel,
+      goldenSpotsHit: _goldenSpotsHitCount,
+      feverTriggeredCount: _feverTriggeredCount,
+      discoveredTrophiesCount: _discoveredTrophyIds.length,
+      claimedQuestIds: _claimedQuestIds,
+      onClaimQuest: (quest) {
+        setState(() {
+          _claimedQuestIds.add(quest.id);
+          _totalCoins += quest.rewardCoins;
+        });
+        _saveProgress();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '🎉 "${quest.title}" ödülü alındı: +${quest.rewardCoins} 🪙!',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      },
+    );
+  }
+
   bool _isToolUnlocked(ScraperTool tool) {
+    if (tool.id == 'mega') return _monetization.isProUser;
     if (_monetization.isProUser) return true;
     if (_highestUnlockedLevel >= tool.unlockLevel) return true;
     if (_monetization.dailyAdUnlockedTools.contains(tool.id)) return true;
@@ -466,9 +591,6 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _hasVibrator = hasVib ?? false;
   }
 
-  // ============================================================================
-  // BELLEK İÇİ OTOMATİK KARELEŞTİRİCİ (AUTO-SQUARE NORMALIZER)
-  // ============================================================================
   Future<ui.Image> _normalizeToSquareImage(ui.Image rawImg) async {
     const int targetSize = 1020;
     if ((rawImg.width - rawImg.height).abs() <= 4 &&
@@ -517,6 +639,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       _isFeverActive = false;
       _wrongToolWarningMessage = null;
       _remainingSeconds = _currentLevel.timeLimitSeconds;
+      _collectedGoldenSpotCoinsThisLevelAttempt = 0;
+      _uxRibbonMessage = ''; // Şeridi sıfırla
     });
 
     if (!_isToolUnlocked(_currentTool)) {
@@ -547,6 +671,18 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     }
   }
 
+  void _spawnRandomGoldenSpot(List<Offset> validCells) {
+    if (validCells.isEmpty) {
+      _goldenSpotNormalized = null;
+      return;
+    }
+    final chosen = validCells[_random.nextInt(validCells.length)];
+    _goldenSpotNormalized = Offset(
+      (chosen.dx + 0.5) / _gridSize,
+      (chosen.dy + 0.5) / _gridSize,
+    );
+  }
+
   void _buildTargetGridForNewLevel() {
     _isTargetCell = List.generate(
       _gridSize,
@@ -568,11 +704,13 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _remainingSeconds = _currentLevel.timeLimitSeconds;
     _isTimerRunning = false;
     _levelStartTimestamp = null;
+    _collectedGoldenSpotCoinsThisLevelAttempt = 0;
 
     if (_cleanImage == null || _cleanPixelData == null) return;
 
     final int imgW = _cleanImage!.width;
     final int imgH = _cleanImage!.height;
+    final List<Offset> validSpotCells = [];
 
     for (int gy = 0; gy < _gridSize; gy++) {
       for (int gx = 0; gx < _gridSize; gx++) {
@@ -591,9 +729,14 @@ class _ScraperGameHubState extends State<ScraperGameHub>
         if (alpha > 40) {
           _isTargetCell[gy][gx] = true;
           _totalTargetCells++;
+          if (gx > 20 && gx < 80 && gy > 20 && gy < 80) {
+            validSpotCells.add(Offset(gx.toDouble(), gy.toDouble()));
+          }
         }
       }
     }
+
+    _spawnRandomGoldenSpot(validSpotCells);
   }
 
   void _advanceToNextDirtStage() {
@@ -619,18 +762,21 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
     if (mounted && !_isZenMode) {
       final nextConfig = _activeStageDirtConfig;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '✨ Katman tamamlandı! Şimdi ${nextConfig.name} için alt bardan "${nextConfig.requiredToolName}" aracını seç!',
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-          backgroundColor: nextConfig.isPolishStage
-              ? Colors.cyan.shade800
-              : Colors.deepOrange.shade800,
-          duration: const Duration(milliseconds: 2400),
-        ),
+
+      // UX ŞERİDİ Güncellemesi (Çirkin Snackbar yerine)
+      _updateUxRibbon(
+        message:
+            '✨ Katman tamamlandı! Şimdi ${nextConfig.name} için "${nextConfig.requiredToolName}" aracını seç!',
+        icon: nextConfig.isPolishStage
+            ? Icons.auto_fix_high_rounded
+            : Icons.cleaning_services_rounded,
+        bgColor: nextConfig.isPolishStage
+            ? Colors.cyan.shade900.withValues(alpha: 0.25)
+            : Colors.deepOrange.shade900.withValues(alpha: 0.25),
+        textColor: nextConfig.isPolishStage
+            ? Colors.cyanAccent
+            : Colors.orangeAccent,
+        durationMs: 3200,
       );
     }
   }
@@ -650,6 +796,34 @@ class _ScraperGameHubState extends State<ScraperGameHub>
         _isLevelCompleted ||
         _waitingForFingerLift) {
       return false;
+    }
+
+    // 💎 GOLDEN SPOT YAKALAMA KONTROLÜ
+    if (_goldenSpotNormalized != null) {
+      final Offset spotCanvasPos = Offset(
+        _goldenSpotNormalized!.dx * canvasSize,
+        _goldenSpotNormalized!.dy * canvasSize,
+      );
+      if ((to - spotCanvasPos).distance <= (_effectiveBrushSize * 0.65 + 14)) {
+        _goldenSpotNormalized = null;
+
+        _collectedGoldenSpotCoinsThisLevelAttempt += 10;
+        _goldenSpotsHitCount++;
+
+        if (_hasVibrator && _isHapticsEnabled) {
+          Vibration.vibrate(duration: 60, amplitude: 255);
+        }
+        if (mounted && !_isZenMode) {
+          // UX ŞERİDİ Güncellemesi (Snackbar yerine)
+          _updateUxRibbon(
+            message:
+                '💎 ELMAS DAMARI KEŞFEDİLDİ! Bölüm sonu +10 BONUS ALTIN kazanacaksın!',
+            icon: Icons.diamond_rounded,
+            bgColor: Colors.amber.shade900.withValues(alpha: 0.25),
+            textColor: Colors.amberAccent,
+          );
+        }
+      }
     }
 
     bool newlyScrapedAny = false;
@@ -710,6 +884,8 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       );
       if (_feverCharge >= 0.95 && !_isFeverActive) {
         _isFeverActive = true;
+        _feverTriggeredCount++;
+        _saveProgress();
       }
 
       _stageCleanPercentage =
@@ -735,10 +911,13 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _waitingForFingerLift = false;
     _stageCleanPercentage = 100.0;
     _activeFingerPos = null;
+    _goldenSpotNormalized = null;
     _isFeverActive = false;
     _wrongToolWarningMessage = null;
     _stopScrapeFeedback();
     _particles.clear();
+    _uxRibbonTimer?.cancel();
+    _uxRibbonMessage = ''; // Şeridi temizle
 
     final int completedLvlNum = _currentLevel.levelNumber;
 
@@ -772,10 +951,13 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _trophyCleanCounts[objId] = (_trophyCleanCounts[objId] ?? 0) + 1;
 
     final int bonusAppliedReward = _lastEarnedStars == 3
-        ? (_currentLevel.coinReward * 1.25).round()
+        ? (_currentLevel.coinReward * 1.2).round()
         : _currentLevel.coinReward;
 
     _totalCoins += bonusAppliedReward;
+    _totalCoins += _collectedGoldenSpotCoinsThisLevelAttempt;
+    _collectedGoldenSpotCoinsThisLevelAttempt = 0;
+
     if (_activePlayingLevelNum >= _highestUnlockedLevel) {
       _highestUnlockedLevel++;
     }
@@ -900,6 +1082,12 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                 ElevatedButton.icon(
                   onPressed: () async {
                     Navigator.pop(ctx);
+
+                    if (!_monetization.isProUser) {
+                      _showProOnlyModal();
+                      return;
+                    }
+
                     final watched = await _monetization.showRewardedAd(
                       context,
                       purpose:
@@ -972,13 +1160,11 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       setState(() => _monetization.remainingProSkipsToday--);
       await _saveProgress();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '👑 PRO Hak Kullanıldı! Kalan: ${_monetization.remainingProSkipsToday}/${MonetizationManager.maxDailyProSkips}',
-            ),
-            backgroundColor: Colors.amber.shade800,
-          ),
+        _updateUxRibbon(
+          message:
+              '👑 PRO Hak Kullanıldı! Kalan: ${_monetization.remainingProSkipsToday}/5',
+          icon: Icons.workspace_premium_rounded,
+          textColor: Colors.amberAccent,
         );
       }
       _completeEntireLevel(canvasSize, wasSkipped: true);
@@ -989,13 +1175,10 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       setState(() => _skipTickets--);
       await _saveProgress();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '🎟️ Atlama Bileti kullanıldı! Kalan biletin: $_skipTickets',
-            ),
-            backgroundColor: Colors.green,
-          ),
+        _updateUxRibbon(
+          message: '🎟️ Atlama Bileti kullanıldı! Kalan bilet: $_skipTickets',
+          icon: Icons.fast_forward_rounded,
+          textColor: Colors.greenAccent,
         );
       }
       _completeEntireLevel(canvasSize, wasSkipped: true);
@@ -1024,8 +1207,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
     if (!mounted) return;
     setState(() {
-      _currentStageIndex =
-          0; // GÜVENLİK: Yeni seviyeye geçerken katman indeksini sıfırla!
+      _currentStageIndex = 0;
       _currentLevel = LevelGenerator.generateLevel(_activePlayingLevelNum);
     });
     _loadLevelAssets();
@@ -1033,6 +1215,11 @@ class _ScraperGameHubState extends State<ScraperGameHub>
 
   Future<void> _onSelectTool(int index) async {
     final tool = _tools[index];
+
+    if (tool.id == 'mega' && !_monetization.isProUser) {
+      _showProOnlyModal();
+      return;
+    }
 
     if (!_isToolUnlocked(tool)) {
       final bool unlocked = await _monetization.showRewardedAd(
@@ -1055,7 +1242,132 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     });
   }
 
+  void _showProOnlyModal() {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF14141A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+            side: const BorderSide(color: Colors.amber, width: 2),
+          ),
+          title: const Column(
+            children: [
+              Icon(
+                Icons.workspace_premium_rounded,
+                color: Colors.amber,
+                size: 58,
+              ),
+              SizedBox(height: 10),
+              Text(
+                'VIP SÜRÜME GEÇİŞ',
+                style: TextStyle(
+                  color: Colors.amber,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 20,
+                ),
+              ),
+              Text(
+                'Lazer Aleti Yalnızca VIP Sürümde!',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.bolt_rounded, color: Colors.cyanAccent),
+                title: Text(
+                  'Sınırsız Mega Lazer Kullanımı',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  'Tüm kaba çamur ve oksiti saniyede süpürür!',
+                  style: TextStyle(color: Colors.white54, fontSize: 10),
+                ),
+              ),
+              ListTile(
+                leading: Icon(Icons.fast_forward_rounded, color: Colors.amber),
+                title: Text(
+                  'Her Gün Ücretsiz 5 Bölüm Atlama',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: Icon(Icons.block_rounded, color: Colors.redAccent),
+                title: Text(
+                  'Tüm Araya Giren Reklamları Engeller',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _monetization.isProUser = true;
+                      _monetization.remainingProSkipsToday = 5;
+                      _selectedToolIndex = 5;
+                    });
+                    await _saveProgress();
+
+                    _updateUxRibbon(
+                      message: '👑 VIP (PRO) Sürüm Başarıyla Aktif Edildi!',
+                      icon: Icons.workspace_premium_rounded,
+                      textColor: Colors.amberAccent,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text(
+                    'Simüle Satın Al (0.00 ₺)',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(
+                    'Daha Sonra',
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showDeveloperDebugModal() {
+    if (!kDebugMode) return;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
@@ -1107,12 +1419,18 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     _monetization.remainingProSkipsToday = 0;
                     _unlockedSkinIds = ['skin_default'];
                     _currentSkinId = 'skin_default';
+                    _unlockedThemeIds = ['theme_default'];
+                    _currentThemeId = 'theme_default';
                     _discoveredTrophyIds.clear();
                     _trophyCleanCounts.clear();
                     _levelStars.clear();
+                    _claimedQuestIds.clear();
+                    _goldenSpotsHitCount = 0;
+                    _feverTriggeredCount = 0;
                     _selectedToolIndex = 0;
                     _currentLevel = LevelGenerator.generateLevel(1);
                   });
+                  await _saveProgress();
                   if (ctx.mounted) Navigator.pop(ctx);
                   await _loadLevelAssets();
                 },
@@ -1161,8 +1479,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     child: OutlinedButton(
                       onPressed: () async {
                         setState(() {
-                          _currentStageIndex =
-                              0; // GÜVENLİK: Önce indeksi sıfırla!
+                          _currentStageIndex = 0;
                           _highestUnlockedLevel = (_highestUnlockedLevel + 5)
                               .clamp(1, 50);
                           _activePlayingLevelNum = _highestUnlockedLevel;
@@ -1211,7 +1528,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
             final int upgradeCost = 200 + (_brushPowerUpgradeLevel * 150);
             final bool isMaxUpgrade = _brushPowerUpgradeLevel >= 10;
 
-            return Padding(
+            return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1246,7 +1563,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   Row(
                     children: [
                       Expanded(
@@ -1254,10 +1571,10 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                           onPressed: () async {
                             final watched = await _monetization.showRewardedAd(
                               context,
-                              purpose: '+250 Altın kazanmak',
+                              purpose: '+150 Altın kazanmak',
                             );
                             if (watched && mounted) {
-                              setState(() => _totalCoins += 250);
+                              setState(() => _totalCoins += 150);
                               setModalState(() {});
                               await _saveProgress();
                             }
@@ -1271,7 +1588,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                             size: 18,
                           ),
                           label: const Text(
-                            '+250 🪙 (REKLAM)',
+                            '+150 🪙 (REKLAM)',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 11,
@@ -1283,9 +1600,9 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                       Expanded(
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            if (_totalCoins >= 300) {
+                            if (_totalCoins >= 400) {
                               setState(() {
-                                _totalCoins -= 300;
+                                _totalCoins -= 400;
                                 _skipTickets++;
                               });
                               setModalState(() {});
@@ -1301,7 +1618,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                             size: 18,
                           ),
                           label: const Text(
-                            '+1 BİLET (300 🪙)',
+                            '+1 BİLET (400 🪙)',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 11,
@@ -1312,6 +1629,84 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     ],
                   ),
                   const SizedBox(height: 10),
+
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.purple.shade900,
+                          const Color(0xFF14141A),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.amber, width: 1.5),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.workspace_premium_rounded,
+                          color: Colors.amber,
+                          size: 32,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _monetization.isProUser
+                                    ? 'ETKİN: VIP (PRO) SÜRÜM'
+                                    : 'VIP (PRO) SÜRÜME GEÇ',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.amber,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                _monetization.isProUser
+                                    ? 'Sınırsız Lazer & Sınırsız Hak'
+                                    : 'Sonsuz Lazer, Reklamsızlık ve Sınırsız Ayrıcalık!',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            if (_monetization.isProUser) {
+                              setState(() {
+                                _monetization.isProUser = false;
+                              });
+                              setModalState(() {});
+                              _saveProgress();
+                            } else {
+                              _showProOnlyModal();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _monetization.isProUser
+                                ? Colors.redAccent
+                                : Colors.amber,
+                            foregroundColor: Colors.black,
+                          ),
+                          child: Text(
+                            _monetization.isProUser ? 'KAPAT' : 'VIP OL',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                     tileColor: Colors.white10,
@@ -1362,8 +1757,17 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     ),
                   ),
                   const SizedBox(height: 14),
+                  const Text(
+                    'EFSANEVİ ALET KOSTÜMLERİ (SKINS)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   SizedBox(
-                    height: 170,
+                    height: 150,
                     child: ListView.builder(
                       scrollDirection: Axis.horizontal,
                       itemCount: _skins.length,
@@ -1375,7 +1779,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         final bool isEquipped = _currentSkinId == item.id;
 
                         return Container(
-                          width: 145,
+                          width: 135,
                           margin: const EdgeInsets.only(right: 10),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
@@ -1390,15 +1794,21 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                           child: Column(
                             children: [
                               CircleAvatar(
+                                radius: 18,
                                 backgroundColor: item.handleGradient.first,
-                                child: Icon(item.icon, color: Colors.white),
+                                child: Icon(
+                                  item.icon,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
                               ),
                               const SizedBox(height: 6),
                               Text(
                                 item.name,
+                                maxLines: 1,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                                  fontSize: 11,
                                 ),
                               ),
                               const Spacer(),
@@ -1432,6 +1842,99 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                         : (isUnlocked
                                               ? 'KUŞAN'
                                               : '${item.price} 🪙'),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'ATÖLYE MASASI TEMALARI (ARKA PLAN)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 140,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _themes.length,
+                      itemBuilder: (context, index) {
+                        final th = _themes[index];
+                        final bool isUnlocked = _unlockedThemeIds.contains(
+                          th.id,
+                        );
+                        final bool isEquipped = _currentThemeId == th.id;
+
+                        return Container(
+                          width: 135,
+                          margin: const EdgeInsets.only(right: 10),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(colors: th.bgGradient),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: isEquipped
+                                  ? Colors.greenAccent
+                                  : th.accentColor.withValues(alpha: 0.5),
+                              width: isEquipped ? 2.0 : 1.0,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(th.icon, color: th.accentColor, size: 24),
+                              const SizedBox(height: 6),
+                              Text(
+                                th.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const Spacer(),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    if (isUnlocked) {
+                                      setState(() => _currentThemeId = th.id);
+                                      setModalState(() {});
+                                      _saveProgress();
+                                    } else if (_totalCoins >= th.price) {
+                                      setState(() {
+                                        _totalCoins -= th.price;
+                                        _unlockedThemeIds.add(th.id);
+                                        _currentThemeId = th.id;
+                                      });
+                                      setModalState(() {});
+                                      _saveProgress();
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isEquipped
+                                        ? Colors.greenAccent
+                                        : Colors.amber,
+                                    foregroundColor: Colors.black,
+                                  ),
+                                  child: Text(
+                                    isEquipped
+                                        ? 'SEÇİLİ'
+                                        : (isUnlocked
+                                              ? 'UYGULA'
+                                              : '${th.price} 🪙'),
                                     style: const TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w900,
@@ -1497,8 +2000,18 @@ class _ScraperGameHubState extends State<ScraperGameHub>
       if (_isHapticsEnabled) HapticFeedback.heavyImpact();
       setState(() {
         _wrongToolWarningMessage =
-            '⚠️ ${_activeStageDirtConfig.name} için alt bardan "${_activeStageDirtConfig.requiredToolName}" seçmelisin!';
+            '⚠️ Bu katman için "${_activeStageDirtConfig.requiredToolName}" aletini seçmelisin!';
       });
+
+      // UX Şeridini titreşimli (Dikkat Çekici) şekilde uyar
+      _updateUxRibbon(
+        message:
+            '⚠️ Yanlış Alet! ${_activeStageDirtConfig.name} için "${_activeStageDirtConfig.requiredToolName}" aletini seçmelisin!',
+        icon: Icons.warning_amber_rounded,
+        bgColor: Colors.red.shade900.withValues(alpha: 0.35),
+        textColor: Colors.redAccent,
+        durationMs: 2500,
+      );
     }
     _warningClearTimer?.cancel();
     _warningClearTimer = Timer(const Duration(milliseconds: 1800), () {
@@ -1623,6 +2136,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     _levelCountdownTimer?.cancel();
     _particleTicker.dispose();
     _movementStopTimer?.cancel();
+    _uxRibbonTimer?.cancel();
     for (final player in _toolPlayers.values) {
       player.dispose();
     }
@@ -1652,11 +2166,11 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     return Scaffold(
       body: Container(
         width: double.infinity,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: RadialGradient(
-            center: Alignment(0.0, -0.2),
+            center: const Alignment(0.0, -0.2),
             radius: 1.1,
-            colors: [Color(0xFF231D2E), Color(0xFF101014)],
+            colors: _currentTheme.bgGradient,
           ),
         ),
         child: SafeArea(
@@ -1672,13 +2186,22 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                   children: [
                     Row(
                       children: [
-                        IconButton(
-                          onPressed: _showDeveloperDebugModal,
-                          icon: const Icon(
-                            Icons.bug_report_rounded,
-                            color: Colors.greenAccent,
+                        if (kDebugMode)
+                          IconButton(
+                            onPressed: _showDeveloperDebugModal,
+                            icon: const Icon(
+                              Icons.bug_report_rounded,
+                              color: Colors.greenAccent,
+                            ),
+                            tooltip: 'Test Konsolu',
                           ),
-                          tooltip: 'Test Konsolu',
+                        IconButton(
+                          onPressed: _openQuestsModal,
+                          icon: const Icon(
+                            Icons.flag_rounded,
+                            color: Colors.cyanAccent,
+                          ),
+                          tooltip: 'Görevler & Başarımlar',
                         ),
                         IconButton(
                           onPressed: _openLeaderboard,
@@ -1690,6 +2213,55 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         ),
                       ],
                     ),
+
+                    GestureDetector(
+                      onTap: () {
+                        if (_monetization.isProUser) {
+                          setState(() {
+                            _monetization.isProUser = false;
+                          });
+                          _saveProgress();
+                        } else {
+                          _showProOnlyModal();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Colors.purple, Colors.amber],
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.amber, width: 1.5),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.workspace_premium_rounded,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _monetization.isProUser
+                                  ? 'ETKİN: VIP 👑'
+                                  : 'VIP OL 👑',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 9.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
@@ -1727,9 +2299,11 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.amber.withValues(alpha: 0.08),
+                      color: _currentTheme.accentColor.withValues(alpha: 0.08),
                       border: Border.all(
-                        color: Colors.amber.withValues(alpha: 0.35),
+                        color: _currentTheme.accentColor.withValues(
+                          alpha: 0.35,
+                        ),
                         width: 2,
                       ),
                     ),
@@ -1746,13 +2320,13 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                   ),
                 ),
                 const SizedBox(height: 18),
-                const Text(
+                Text(
                   'SATISFYING',
                   style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 4.0,
-                    color: Colors.amber,
+                    color: _currentTheme.accentColor,
                   ),
                 ),
                 Text(
@@ -1803,7 +2377,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                   child: ElevatedButton.icon(
                     onPressed: () => setState(() => _isInMainMenu = false),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber,
+                      backgroundColor: _currentTheme.accentColor,
                       foregroundColor: Colors.black,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
@@ -1835,8 +2409,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                           levelStars: _levelStars,
                           onSelectLevel: (lvl) {
                             setState(() {
-                              _currentStageIndex =
-                                  0; // GÜVENLİK: İndeksi sıfırla
+                              _currentStageIndex = 0;
                               _activePlayingLevelNum = lvl;
                               _isInMainMenu = false;
                               _currentLevel = LevelGenerator.generateLevel(lvl);
@@ -1846,7 +2419,18 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         ),
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: _buildMenuCardButton(
+                        icon: Icons.flag_rounded,
+                        color: Colors.amberAccent,
+                        title: 'GÖREVLER',
+                        subtitle:
+                            '${_claimedQuestIds.length}/${QuestItem.allQuests.length} Ödül',
+                        onTap: _openQuestsModal,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: _buildMenuCardButton(
                         icon: Icons.emoji_events_rounded,
@@ -1856,7 +2440,7 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         onTap: _openLeaderboard,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: _buildMenuCardButton(
                         icon: Icons.museum_rounded,
@@ -1870,13 +2454,13 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                         ),
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: _buildMenuCardButton(
                         icon: Icons.storefront_rounded,
                         color: Colors.greenAccent,
                         title: 'ATÖLYE',
-                        subtitle: 'Lv.$_brushPowerUpgradeLevel',
+                        subtitle: 'Tema & Çap',
                         onTap: _showShopModal,
                       ),
                     ),
@@ -1909,16 +2493,25 @@ class _ScraperGameHubState extends State<ScraperGameHub>
         ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 22),
+            Icon(icon, color: color, size: 20),
             const SizedBox(height: 4),
-            Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 10),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 9.5,
+                ),
+              ),
             ),
-            Text(
-              subtitle,
-              maxLines: 1,
-              style: const TextStyle(fontSize: 9, color: Colors.white60),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                subtitle,
+                maxLines: 1,
+                style: const TextStyle(fontSize: 8.5, color: Colors.white60),
+              ),
             ),
           ],
         ),
@@ -1938,429 +2531,523 @@ class _ScraperGameHubState extends State<ScraperGameHub>
     }
 
     return Scaffold(
-      body: SafeArea(
-        child: Stack(
-          alignment: Alignment.topCenter,
-          children: [
-            Column(
-              children: [
-                // 1. ÖZEL ESNEK ÜST BAR
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10.0,
-                    vertical: 6.0,
-                  ),
-                  child: Row(
-                    children: [
-                      if (!_isZenMode)
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: const Alignment(0.0, 0.0),
+            radius: 1.1,
+            colors: _currentTheme.bgGradient,
+          ),
+        ),
+        child: SafeArea(
+          child: Stack(
+            alignment: Alignment.topCenter,
+            children: [
+              Column(
+                children: [
+                  // 1. ÖZEL ESNEK ÜST BAR
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10.0,
+                      vertical: 6.0,
+                    ),
+                    child: Row(
+                      children: [
+                        if (!_isZenMode)
+                          _buildSmallTopIconButton(
+                            icon: Icons.home_rounded,
+                            color: Colors.amber,
+                            onTap: () {
+                              _stopScrapeFeedback();
+                              _levelCountdownTimer?.cancel();
+                              _isTimerRunning = false;
+                              setState(() => _isInMainMenu = true);
+                            },
+                          ),
                         _buildSmallTopIconButton(
-                          icon: Icons.home_rounded,
-                          color: Colors.amber,
-                          onTap: () {
-                            _stopScrapeFeedback();
-                            _levelCountdownTimer?.cancel();
-                            _isTimerRunning = false;
-                            setState(() => _isInMainMenu = true);
-                          },
+                          icon: _isZenMode
+                              ? Icons.visibility_off_rounded
+                              : Icons.videocam_rounded,
+                          color: _isZenMode ? Colors.white24 : Colors.white70,
+                          onTap: () => setState(() => _isZenMode = !_isZenMode),
                         ),
-                      _buildSmallTopIconButton(
-                        icon: _isZenMode
-                            ? Icons.visibility_off_rounded
-                            : Icons.videocam_rounded,
-                        color: _isZenMode ? Colors.white24 : Colors.white70,
-                        onTap: () => setState(() => _isZenMode = !_isZenMode),
-                      ),
-                      if (!_isZenMode)
-                        _buildSmallTopIconButton(
-                          icon: Icons.bug_report_rounded,
-                          color: Colors.greenAccent,
-                          onTap: _showDeveloperDebugModal,
-                        ),
-                      Expanded(
-                        child: _isZenMode
-                            ? const SizedBox.shrink()
-                            : GestureDetector(
-                                onTap: () => GameModals.showLevelMapModal(
-                                  context,
-                                  highestUnlockedLevel: _highestUnlockedLevel,
-                                  activePlayingLevelNum: _activePlayingLevelNum,
-                                  levelStars: _levelStars,
-                                  onSelectLevel: (lvl) {
-                                    setState(() {
-                                      _currentStageIndex =
-                                          0; // GÜVENLİK: İndeksi sıfırla
-                                      _activePlayingLevelNum = lvl;
-                                      _currentLevel =
-                                          LevelGenerator.generateLevel(lvl);
-                                    });
-                                    _loadLevelAssets();
-                                  },
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4.0,
+                        if (kDebugMode && !_isZenMode)
+                          _buildSmallTopIconButton(
+                            icon: Icons.bug_report_rounded,
+                            color: Colors.greenAccent,
+                            onTap: _showDeveloperDebugModal,
+                          ),
+                        Expanded(
+                          child: _isZenMode
+                              ? const SizedBox.shrink()
+                              : GestureDetector(
+                                  onTap: () => GameModals.showLevelMapModal(
+                                    context,
+                                    highestUnlockedLevel: _highestUnlockedLevel,
+                                    activePlayingLevelNum:
+                                        _activePlayingLevelNum,
+                                    levelStars: _levelStars,
+                                    onSelectLevel: (lvl) {
+                                      setState(() {
+                                        _currentStageIndex = 0;
+                                        _activePlayingLevelNum = lvl;
+                                        _currentLevel =
+                                            LevelGenerator.generateLevel(lvl);
+                                      });
+                                      _loadLevelAssets();
+                                    },
                                   ),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          'SV.${_currentLevel.levelNumber}/50 • ${_currentLevel.difficultyLabel}',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color:
-                                                _currentLevel.difficultyColor,
-                                            fontWeight: FontWeight.w900,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4.0,
+                                    ),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            'SV.${_currentLevel.levelNumber}/50 • ${_currentLevel.difficultyLabel}',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color:
+                                                  _currentLevel.difficultyColor,
+                                              fontWeight: FontWeight.w900,
+                                            ),
                                           ),
-                                        ),
-                                        Text(
-                                          _displayedLevelTitle,
-                                          style: const TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.bold,
+                                          Text(
+                                            _displayedLevelTitle,
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                      ),
-                      if (!_isZenMode) ...[
-                        _buildSmallTopIconButton(
-                          icon: Icons.emoji_events_rounded,
-                          color: Colors.orangeAccent,
-                          onTap: _openLeaderboard,
                         ),
-                        GestureDetector(
-                          onTap: _showShopModal,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: Colors.amber.withValues(alpha: 0.5),
+                        if (!_isZenMode) ...[
+                          _buildSmallTopIconButton(
+                            icon: Icons.flag_rounded,
+                            color: Colors.cyanAccent,
+                            onTap: _openQuestsModal,
+                          ),
+                          _buildSmallTopIconButton(
+                            icon: Icons.emoji_events_rounded,
+                            color: Colors.orangeAccent,
+                            onTap: _openLeaderboard,
+                          ),
+                          GestureDetector(
+                            onTap: _showShopModal,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 4,
                               ),
-                            ),
-                            child: Text(
-                              '🪙 $_totalCoins',
-                              style: const TextStyle(
-                                color: Colors.amber,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 11,
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: Colors.amber.withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Text(
+                                '🪙 $_totalCoins',
+                                style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 11,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        _buildSmallTopIconButton(
-                          icon: Icons.refresh_rounded,
-                          color: Colors.white70,
-                          onTap: _resetCanvas,
-                        ),
+                          _buildSmallTopIconButton(
+                            icon: Icons.refresh_rounded,
+                            color: Colors.white70,
+                            onTap: _resetCanvas,
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
 
-                const Spacer(),
-
-                // 2. KONTROL ŞERİDİ
-                if (!_isZenMode)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _wrongToolWarningMessage != null
-                                      ? Colors.redAccent.withValues(alpha: 0.25)
-                                      : Colors.white.withValues(alpha: 0.07),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: _wrongToolWarningMessage != null
-                                        ? Colors.redAccent
-                                        : Colors.cyanAccent.withValues(
-                                            alpha: 0.5,
-                                          ),
-                                  ),
-                                ),
-                                child: Text(
-                                  _isLevelCompleted
-                                      ? (_lastClearedTimeSeconds > 0
-                                            ? '✨ SÜRE: ${_lastClearedTimeSeconds.toStringAsFixed(2)} SN (SIRALAMAYA KAYDEDİLDİ!)'
-                                            : '✨ BÖLÜM ATLANDI (+${_currentLevel.coinReward} 🪙)')
-                                      : (_wrongToolWarningMessage ??
-                                            'AŞAMA ${_currentStageIndex + 1}/$_totalStages: ${_activeStageDirtConfig.name.toUpperCase()} ➔ "${_activeStageDirtConfig.requiredToolName}" SEÇ'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w900,
-                                    color: _wrongToolWarningMessage != null
-                                        ? Colors.amberAccent
-                                        : Colors.cyanAccent,
-                                  ),
-                                ),
+                  // 💎 UX BİLGİ ŞERİDİ (2 SATIR DESTEKLİ SABİT YÜKSEKLİK - EKRANI KAYDIRMAZ & KESİLMEZ!)
+                  if (!_isZenMode)
+                    SizedBox(
+                      height: 48,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 220),
+                          opacity: _uxRibbonMessage.isNotEmpty ? 1.0 : 0.0,
+                          child: Container(
+                            width: double.infinity,
+                            alignment: Alignment.center,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _uxRibbonBgColor,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _uxRibbonMessage.isNotEmpty
+                                    ? _uxRibbonTextColor.withValues(alpha: 0.4)
+                                    : Colors.transparent,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            if (!_isLevelCompleted)
-                              InkWell(
-                                onTap: () =>
-                                    _handleSkipLevel(screenCanvasEstimate),
-                                borderRadius: BorderRadius.circular(14),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.amber.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(color: Colors.amber),
-                                  ),
-                                  child: Text(
-                                    skipButtonText,
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w900,
-                                      color: Colors.amber,
-                                    ),
-                                  ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  _uxRibbonIcon,
+                                  color: _uxRibbonTextColor,
+                                  size: 18,
                                 ),
-                              )
-                            else
-                              GestureDetector(
-                                onTapDown: (_) =>
-                                    setState(() => _isShowingBefore = true),
-                                onTapUp: (_) =>
-                                    setState(() => _isShowingBefore = false),
-                                onTapCancel: () =>
-                                    setState(() => _isShowingBefore = false),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _isShowingBefore
-                                        ? Colors.amber
-                                        : Colors.amber.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(color: Colors.amber),
-                                  ),
+                                const SizedBox(width: 8),
+                                Expanded(
                                   child: Text(
-                                    _isShowingBefore
-                                        ? 'İLK HALİ'
-                                        : 'ÖNCESİ (TUT)',
+                                    _uxRibbonMessage,
+                                    maxLines: 2,
+                                    softWrap: true,
+                                    overflow: TextOverflow.visible,
                                     style: TextStyle(
-                                      fontSize: 10,
+                                      color: _uxRibbonTextColor,
                                       fontWeight: FontWeight.w900,
-                                      color: _isShowingBefore
-                                          ? Colors.black
-                                          : Colors.amber,
+                                      fontSize: 10.5,
+                                      height: 1.2,
+                                      letterSpacing: 0.1,
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (_remainingSeconds != null &&
-                                      !_isLevelCompleted)
-                                    Text(
-                                      '⏱️ KALAN SÜRE: $_remainingSeconds SN',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w900,
-                                        color: _remainingSeconds! <= 8
-                                            ? Colors.redAccent
-                                            : Colors.amber,
-                                      ),
+                      ),
+                    ),
+
+                  const Spacer(),
+
+                  // 2. KONTROL ŞERİDİ
+                  if (!_isZenMode)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _wrongToolWarningMessage != null
+                                        ? Colors.redAccent.withValues(
+                                            alpha: 0.25,
+                                          )
+                                        : Colors.white.withValues(alpha: 0.07),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: _wrongToolWarningMessage != null
+                                          ? Colors.redAccent
+                                          : Colors.cyanAccent.withValues(
+                                              alpha: 0.5,
+                                            ),
                                     ),
-                                  Text(
-                                    _isFeverActive
-                                        ? '🔥 FEVER 2X KOMBO AKTİF! (+%35 DEV ÇAP)'
-                                        : (_isCorrectToolSelectedForCurrentStage
-                                              ? '✅ DOĞRU ALET SEÇİLİ (${_currentTool.shortName.toUpperCase()})'
-                                              : '❌ ALT BARDAN "${_activeStageDirtConfig.requiredToolName}" SEÇ!'),
+                                  ),
+                                  child: Text(
+                                    _isLevelCompleted
+                                        ? (_lastClearedTimeSeconds > 0
+                                              ? '✨ SÜRE: ${_lastClearedTimeSeconds.toStringAsFixed(2)} SN'
+                                              : '✨ BÖLÜM ATLANDI (+${_currentLevel.coinReward} 🪙)')
+                                        : (_wrongToolWarningMessage ??
+                                              'AŞAMA ${_currentStageIndex + 1}/$_totalStages: ${_activeStageDirtConfig.name.toUpperCase()} ➔ "${_activeStageDirtConfig.requiredToolName}" SEÇ'),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize: 11,
+                                      fontSize: 10,
                                       fontWeight: FontWeight.w900,
-                                      color: _isFeverActive
-                                          ? Colors.deepOrangeAccent
-                                          : (_isCorrectToolSelectedForCurrentStage
-                                                ? Colors.greenAccent
-                                                : Colors.redAccent),
+                                      color: _wrongToolWarningMessage != null
+                                          ? Colors.amberAccent
+                                          : Colors.cyanAccent,
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
-                            Text(
-                              '%$displayPercent',
-                              style: TextStyle(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w900,
-                                color: _isLevelCompleted
+                              const SizedBox(width: 8),
+                              if (!_isLevelCompleted)
+                                InkWell(
+                                  onTap: () =>
+                                      _handleSkipLevel(screenCanvasEstimate),
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withValues(
+                                        alpha: 0.15,
+                                      ),
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(color: Colors.amber),
+                                    ),
+                                    child: Text(
+                                      skipButtonText,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.amber,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                GestureDetector(
+                                  onTapDown: (_) =>
+                                      setState(() => _isShowingBefore = true),
+                                  onTapUp: (_) =>
+                                      setState(() => _isShowingBefore = false),
+                                  onTapCancel: () =>
+                                      setState(() => _isShowingBefore = false),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _isShowingBefore
+                                          ? Colors.amber
+                                          : Colors.amber.withValues(
+                                              alpha: 0.15,
+                                            ),
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(color: Colors.amber),
+                                    ),
+                                    child: Text(
+                                      _isShowingBefore
+                                          ? 'İLK HALİ'
+                                          : 'ÖNCESİ (TUT)',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        color: _isShowingBefore
+                                            ? Colors.black
+                                            : Colors.amber,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_remainingSeconds != null &&
+                                        !_isLevelCompleted)
+                                      ScaleTransition(
+                                        scale: _remainingSeconds! <= 10
+                                            ? Tween<double>(
+                                                begin: 0.95,
+                                                end: 1.05,
+                                              ).animate(
+                                                CurvedAnimation(
+                                                  parent: _pulseController,
+                                                  curve: Curves.easeInOut,
+                                                ),
+                                              )
+                                            : const AlwaysStoppedAnimation(1.0),
+                                        child: Text(
+                                          '⏱️ KALAN SÜRE: $_remainingSeconds SN',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w900,
+                                            color: _remainingSeconds! <= 10
+                                                ? Colors.redAccent
+                                                : Colors.amber,
+                                          ),
+                                        ),
+                                      ),
+                                    Text(
+                                      _isFeverActive
+                                          ? '🔥 FEVER 2X KOMBO AKTİF! (+%35 DEV ÇAP)'
+                                          : (_isCorrectToolSelectedForCurrentStage
+                                                ? '✅ DOĞRU ALET SEÇİLİ (${_currentTool.shortName.toUpperCase()})'
+                                                : '❌ ALT BARDAN "${_activeStageDirtConfig.requiredToolName}" SEÇ!'),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w900,
+                                        color: _isFeverActive
+                                            ? Colors.deepOrangeAccent
+                                            : (_isCorrectToolSelectedForCurrentStage
+                                                  ? Colors.greenAccent
+                                                  : Colors.redAccent),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                '%$displayPercent',
+                                style: TextStyle(
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
+                                  color: _isLevelCompleted
+                                      ? Colors.greenAccent
+                                      : Colors.amber,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: LinearProgressIndicator(
+                              value: _stageCleanPercentage / 100.0,
+                              minHeight: 9,
+                              backgroundColor: Colors.white12,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                _isLevelCompleted
                                     ? Colors.greenAccent
                                     : Colors.amber,
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 5),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: LinearProgressIndicator(
-                            value: _stageCleanPercentage / 100.0,
-                            minHeight: 9,
-                            backgroundColor: Colors.white12,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              _isLevelCompleted
-                                  ? Colors.greenAccent
-                                  : Colors.amber,
+                          ),
+                          const SizedBox(height: 4),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: LinearProgressIndicator(
+                              value: _feverCharge,
+                              minHeight: 4,
+                              backgroundColor: Colors.white10,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                _isFeverActive
+                                    ? Colors.deepOrangeAccent
+                                    : Colors.cyanAccent,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: LinearProgressIndicator(
-                            value: _feverCharge,
-                            minHeight: 4,
-                            backgroundColor: Colors.white10,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              _isFeverActive
-                                  ? Colors.deepOrangeAccent
-                                  : Colors.cyanAccent,
+                        ],
+                      ),
+                    ),
+
+                  const SizedBox(height: 10),
+
+                  // 3. KAZIMA TUVALİ
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: AspectRatio(
+                      aspectRatio: 1.0,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final double canvasSize = constraints.maxWidth;
+                          return GestureDetector(
+                            onTap: _isLevelCompleted ? _nextLevel : null,
+                            onPanStart: (details) =>
+                                _onPanStart(details, canvasSize),
+                            onPanUpdate: (details) =>
+                                _onPanUpdate(details, canvasSize),
+                            onPanEnd: _onPanEnd,
+                            child: AnimatedBuilder(
+                              animation: Listenable.merge([
+                                _shineController,
+                                _pulseController,
+                              ]),
+                              builder: (context, child) {
+                                return CustomPaint(
+                                  painter: ScrapePainter(
+                                    cleanImage: _cleanImage!,
+                                    stageDirtyImages: _stageDirtyImages,
+                                    dirtStages: _currentLevel.dirtStages,
+                                    currentStageIndex: _currentStageIndex,
+                                    strokes: _strokes,
+                                    particles: _particles,
+                                    isLevelCompleted: _isLevelCompleted,
+                                    isShowingBefore: _isShowingBefore,
+                                    shineProgress: _shineController.value,
+                                    activeFingerPos: _activeFingerPos,
+                                    activeTool: _currentTool,
+                                    effectiveBrushSize: _effectiveBrushSize,
+                                    toolTiltAngle: _toolTiltAngle,
+                                    dirtOpacity: _effectiveDirtOpacity,
+                                    activeSkin: _currentSkin,
+                                    isFeverActive: _isFeverActive,
+                                    goldenSpotNormalized: _goldenSpotNormalized,
+                                    pulseValue: _pulseController.value,
+                                  ),
+                                );
+                              },
                             ),
-                          ),
-                        ),
-                      ],
+                          );
+                        },
+                      ),
                     ),
                   ),
 
-                const SizedBox(height: 10),
+                  const Spacer(),
 
-                // 3. KAZIMA TUVALİ
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: AspectRatio(
-                    aspectRatio: 1.0,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final double canvasSize = constraints.maxWidth;
-                        return GestureDetector(
-                          onTap: _isLevelCompleted ? _nextLevel : null,
-                          onPanStart: (details) =>
-                              _onPanStart(details, canvasSize),
-                          onPanUpdate: (details) =>
-                              _onPanUpdate(details, canvasSize),
-                          onPanEnd: _onPanEnd,
-                          child: AnimatedBuilder(
-                            animation: _shineController,
-                            builder: (context, child) {
-                              return CustomPaint(
-                                painter: ScrapePainter(
-                                  cleanImage: _cleanImage!,
-                                  stageDirtyImages: _stageDirtyImages,
-                                  dirtStages: _currentLevel.dirtStages,
-                                  currentStageIndex: _currentStageIndex,
-                                  strokes: _strokes,
-                                  particles: _particles,
-                                  isLevelCompleted: _isLevelCompleted,
-                                  isShowingBefore: _isShowingBefore,
-                                  shineProgress: _shineController.value,
-                                  activeFingerPos: _activeFingerPos,
-                                  activeTool: _currentTool,
-                                  effectiveBrushSize: _effectiveBrushSize,
-                                  toolTiltAngle: _toolTiltAngle,
-                                  dirtOpacity: _effectiveDirtOpacity,
-                                  activeSkin: _currentSkin,
-                                  isFeverActive: _isFeverActive,
+                  // 4. ALT 6'LI SABİT DOCK BAR
+                  if (!_isZenMode)
+                    SizedBox(
+                      height: 80,
+                      child: _isLevelCompleted
+                          ? Center(
+                              child: ElevatedButton.icon(
+                                onPressed: _nextLevel,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.amber,
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 32,
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                  ),
                                 ),
-                              );
-                            },
-                          ),
-                        );
-                      },
+                                icon: const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 26,
+                                ),
+                                label: Text(
+                                  'SEVİYE $_activePlayingLevelNum • DEVAM ET',
+                                  style: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : _buildFixedSixToolDock(),
                     ),
-                  ),
-                ),
+                  const SizedBox(height: 8),
+                ],
+              ),
 
-                const Spacer(),
-
-                // 4. ALT 6'LI SABİT DOCK BAR
-                if (!_isZenMode)
-                  SizedBox(
-                    height: 80,
-                    child: _isLevelCompleted
-                        ? Center(
-                            child: ElevatedButton.icon(
-                              onPressed: _nextLevel,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.amber,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 32,
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(30),
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.arrow_forward_rounded,
-                                size: 26,
-                              ),
-                              label: Text(
-                                'SEVİYE $_activePlayingLevelNum • DEVAM ET',
-                                style: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                          )
-                        : _buildFixedSixToolDock(),
-                  ),
-                const SizedBox(height: 8),
-              ],
-            ),
-
-            ConfettiWidget(
-              confettiController: _confettiController,
-              blastDirection: pi / 2,
-              emissionFrequency: 0.06,
-              numberOfParticles: 25,
-              maxBlastForce: 25,
-              minBlastForce: 10,
-              gravity: 0.25,
-            ),
-          ],
+              ConfettiWidget(
+                confettiController: _confettiController,
+                blastDirection: pi / 2,
+                emissionFrequency: 0.06,
+                numberOfParticles: 25,
+                maxBlastForce: 25,
+                minBlastForce: 10,
+                gravity: 0.25,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2388,7 +3075,12 @@ class _ScraperGameHubState extends State<ScraperGameHub>
         children: List.generate(_tools.length, (index) {
           final tool = _tools[index];
           final bool isSelected = _selectedToolIndex == index;
-          final bool isUnlocked = _isToolUnlocked(tool);
+
+          final bool isLazer = tool.id == 'mega';
+          final bool isUnlocked = isLazer
+              ? _monetization.isProUser
+              : _isToolUnlocked(tool);
+
           final bool isRequiredForCurrentDirt =
               tool.id == _activeStageDirtConfig.requiredToolId;
 
@@ -2461,8 +3153,10 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                                 ),
                               ),
                               if (!isUnlocked)
-                                const Icon(
-                                  Icons.lock_rounded,
+                                Icon(
+                                  isLazer
+                                      ? Icons.workspace_premium_rounded
+                                      : Icons.lock_rounded,
                                   color: Colors.amber,
                                   size: 11,
                                 ),
@@ -2487,7 +3181,9 @@ class _ScraperGameHubState extends State<ScraperGameHub>
                             fit: BoxFit.scaleDown,
                             child: Text(
                               !isUnlocked
-                                  ? 'SV.${tool.unlockLevel}/📺'
+                                  ? (isLazer
+                                        ? 'VIP 👑'
+                                        : 'SV.${tool.unlockLevel}/📺')
                                   : (shouldHighlight
                                         ? '★ SEÇ'
                                         : tool.specialtyLabel),

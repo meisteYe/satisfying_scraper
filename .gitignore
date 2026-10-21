@@ -43,3 +43,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+/android/app/google-services.json
+
+# Hassas Yapilandirma ve Imza Dosyalari
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart
+android/key.properties
+**/*.jks
+**/*.keystore
+.env*

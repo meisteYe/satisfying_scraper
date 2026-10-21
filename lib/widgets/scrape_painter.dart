@@ -19,6 +19,8 @@ class ScrapePainter extends CustomPainter {
   final double dirtOpacity;
   final ToolSkin activeSkin;
   final bool isFeverActive;
+  final Offset? goldenSpotNormalized; // 0.0..1.0 arası normalize koordinat
+  final double pulseValue;
 
   ScrapePainter({
     required this.cleanImage,
@@ -37,6 +39,8 @@ class ScrapePainter extends CustomPainter {
     required this.dirtOpacity,
     required this.activeSkin,
     required this.isFeverActive,
+    this.goldenSpotNormalized,
+    this.pulseValue = 0.5,
   });
 
   static const List<double> _polishFoamMatrix = [
@@ -151,7 +155,47 @@ class ScrapePainter extends CustomPainter {
       isPolishFoam: currentIsPolish,
     );
 
-    // 4. PARÇACIKLAR VE YÜKSELEN BUHAR BULUTLARI
+    // 💎 GOLDEN SPOT (ELMAS DAMARI) ÇİZİMİ
+    if (goldenSpotNormalized != null && !isLevelCompleted && !isShowingBefore) {
+      final Offset spotPos = Offset(
+        goldenSpotNormalized!.dx * size.width,
+        goldenSpotNormalized!.dy * size.height,
+      );
+      final double radius = 18.0 + (pulseValue * 8.0);
+
+      // Dış parlama halkası
+      canvas.drawCircle(
+        spotPos,
+        radius,
+        Paint()
+          ..color = Colors.amberAccent.withValues(alpha: 0.35)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
+      canvas.drawCircle(
+        spotPos,
+        radius * 0.75,
+        Paint()
+          ..color = Colors.cyanAccent
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5,
+      );
+      // Elmas şekilli merkez çekirdek
+      final Path diamond = Path()
+        ..moveTo(spotPos.dx, spotPos.dy - 9)
+        ..lineTo(spotPos.dx + 9, spotPos.dy)
+        ..lineTo(spotPos.dx, spotPos.dy + 9)
+        ..lineTo(spotPos.dx - 9, spotPos.dy)
+        ..close();
+      canvas.drawPath(diamond, Paint()..color = Colors.amber);
+      canvas.drawPath(
+        diamond,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+    }
+
     final Paint particlePaint = Paint()..style = PaintingStyle.fill;
     final Paint steamCloudPaint = Paint()
       ..style = PaintingStyle.fill
@@ -159,7 +203,6 @@ class ScrapePainter extends CustomPainter {
 
     for (final p in particles) {
       if (p.isSteamCloud) {
-        // Buhar bulutu: Yumuşak kenarlı, yarı saydam duman halkası!
         steamCloudPaint.color = p.color.withValues(
           alpha: (p.life * 0.55).clamp(0.0, 1.0),
         );
@@ -273,7 +316,6 @@ class ScrapePainter extends CustomPainter {
     }
 
     if (activeTool.id == 'sponge') {
-      // 1. ISLAK TEMİZLİK SÜNGERİ
       canvas.rotate(toolTiltAngle);
       final RRect spongeBody = RRect.fromRectAndRadius(
         Rect.fromCenter(
@@ -294,9 +336,7 @@ class ScrapePainter extends CustomPainter {
           ).createShader(spongeBody.outerRect),
       );
     } else if (activeTool.id == 'polish') {
-      // 2. PARLATICI CİLA SPREYİ ŞİŞESİ & PÜSKÜRTME BAŞLIĞI
       canvas.rotate(toolTiltAngle * 0.7);
-      // Püskürtülen parlak cila sisi
       canvas.drawCircle(
         Offset.zero,
         w * 0.55,
@@ -304,7 +344,6 @@ class ScrapePainter extends CustomPainter {
           ..color = Colors.cyanAccent.withValues(alpha: 0.35)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
       );
-      // Beyaz sprey tetik ve boyun kısmı
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           const Rect.fromLTWH(-10, 4, 20, 18),
@@ -312,7 +351,6 @@ class ScrapePainter extends CustomPainter {
         ),
         Paint()..color = Colors.white,
       );
-      // Sprey şişesi gövdesi
       final RRect bottle = RRect.fromRectAndRadius(
         Rect.fromLTWH(-w * 0.38, 20, w * 0.76, 76),
         const Radius.circular(16),
@@ -327,12 +365,8 @@ class ScrapePainter extends CustomPainter {
           ).createShader(bottle.outerRect),
       );
     } else if (activeTool.id == 'steam') {
-      // ==========================================================
-      // 3. GERÇEKÇİ BASINÇLI BUHAR MAKİNESİ (STEAM CLEANER GUN)
-      // ==========================================================
       canvas.rotate(toolTiltAngle * 0.8);
 
-      // A) Namludan Yüzeye Püsküren Basınçlı Sıcak Buhar Konisi (Steam Jet)
       final Path steamJetCone = Path()
         ..moveTo(-w * 0.22, 16)
         ..lineTo(-w * 0.58, -14)
@@ -355,7 +389,6 @@ class ScrapePainter extends CustomPainter {
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
       );
 
-      // B) 3 Delikli Çelik Buhar Difüzör Başlığı (y = 14 ile 28 arası)
       final RRect nozzleHead = RRect.fromRectAndRadius(
         Rect.fromLTWH(-w * 0.36, 14, w * 0.72, 14),
         const Radius.circular(4),
@@ -367,13 +400,11 @@ class ScrapePainter extends CustomPainter {
             colors: [Color(0xFF78909C), Color(0xFFECEFF1), Color(0xFF546E7A)],
           ).createShader(nozzleHead.outerRect),
       );
-      // Buhar çıkış delikleri
       final Paint holePaint = Paint()..color = const Color(0xFF263238);
       canvas.drawCircle(Offset(-w * 0.20, 18), 2.5, holePaint);
       canvas.drawCircle(const Offset(0, 18), 2.5, holePaint);
       canvas.drawCircle(Offset(w * 0.20, 18), 2.5, holePaint);
 
-      // C) Buhar Makinesi Sarı/Siyah Sanayi Gövdesi (y = 28 ile 96 arası)
       final RRect machineBody = RRect.fromRectAndRadius(
         Rect.fromLTWH(-w * 0.32, 28, w * 0.64, 68),
         const Radius.circular(14),
@@ -388,7 +419,6 @@ class ScrapePainter extends CustomPainter {
           ).createShader(machineBody.outerRect),
       );
 
-      // D) Gövde Üzerindeki Yuvarlak Basınç Göstergesi (Manometre Saati)
       const Offset gaugeCenter = Offset(0, 54);
       canvas.drawCircle(
         gaugeCenter,
@@ -396,7 +426,6 @@ class ScrapePainter extends CustomPainter {
         Paint()..color = const Color(0xFF212121),
       );
       canvas.drawCircle(gaugeCenter, 9.5, Paint()..color = Colors.white);
-      // Kırmızı basınç ibresi
       canvas.drawLine(
         gaugeCenter,
         const Offset(5, 48),
@@ -406,7 +435,6 @@ class ScrapePainter extends CustomPainter {
           ..strokeCap = StrokeCap.round,
       );
 
-      // E) Alttan Çıkan Kalın Siyah Buhar Hortumu (y = 96 ile 122 arası)
       canvas.drawLine(
         const Offset(0, 96),
         const Offset(0, 122),
@@ -416,7 +444,6 @@ class ScrapePainter extends CustomPainter {
           ..strokeCap = StrokeCap.round,
       );
     } else if (activeTool.id == 'razor' || activeTool.id == 'grinder') {
-      // 4 & 5. ÇELİK JİLET SPATULA VE AĞIR ZIMPARA
       canvas.rotate(toolTiltAngle * 0.8);
 
       canvas.drawRect(
@@ -471,7 +498,6 @@ class ScrapePainter extends CustomPainter {
           ).createShader(gripRect.outerRect),
       );
     } else if (activeTool.id == 'mega') {
-      // 6. MEGA PLAZMA LAZERİ
       final double r = w * 0.5;
 
       canvas.drawCircle(
